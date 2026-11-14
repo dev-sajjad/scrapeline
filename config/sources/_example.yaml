@@ -1,0 +1,28 @@
+# Source registry entry. One file per source. Copy, rename, fill. Underscore prefix = ignored.
+id: example_static_list
+name: Example — static paginated list (fixture)
+kind: html                 # api | html | js | pdf_index
+entry: ${FIXTURE_BASE_URL}/static-list/
+cadence: daily             # cron or keyword: hourly | daily | weekly
+politeness:
+  rps: 1                   # requests per second, per host
+  concurrency: 1
+  user_agent: default      # resolves to CRAWLER_USER_AGENT
+  respect_robots: true
+legal:
+  terms_checked: 2026-11-13
+  notes: "Fixture site. Public, owned by this project."
+schema: Meeting            # pydantic model in scrapeline.pipeline.models
+watermark: meeting_date    # field used for incremental runs
+adapter: scrapeline.adapters.example_static_list
+owner: human               # human | agent:<run-id>
+status: draft              # draft | active | broken | retired
+config_version: 1
+instruction:
+  collect: "All meetings with date, title, location, agenda PDF link"
+  schema: Meeting
+  pagination: next-link      # none | next-link | page-number | cursor | load-more (runtime strategy)
+  documents: link-only       # ignore | link-only | download
+  allowed_hosts: [localhost]
+  constraints: { max_pages_per_run: 10, respect_robots: true, rps: 1 }
+  fields_excluded: [attendees, contact_email, phone, signatures]
