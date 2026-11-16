@@ -2,7 +2,9 @@
 
 Production-grade scraper platform. A human or an agent registers a **source** (any public website, API or document index) with an instruction describing what to collect. The platform generates or hand-writes an **adapter**, tests it against fixtures, runs it politely on a schedule, stores raw bytes immutably, normalises records into PostgreSQL, checks quality, detects drift, and lets a bounded repair agent propose fixes that a human reviews and merges.
 
-Portfolio target: Turl Street Group "Junior Data Engineer (Scraping & AI Agents)". Coverage map: `docs/job-requirements-map.md`. Every phase below must move a row in that map from ☐ to ☑.
+**Scale model (how real civic-data teams cover 10,000+ jurisdictions):** most US cities publish meetings through a few vendor platforms (Legistar/Granicus, CivicPlus AgendaCenter, PrimeGov, eScribe, BoardDocs, iQM2). scrapeline writes **one platform adapter per vendor**; a jurisdiction is then just a YAML file with `platform` + `tenant`. Custom one-off sites (the long tail) get a **site adapter**, which is where the generator agent works. Drift on a platform adapter is high-impact (many cities break at once); drift on a site adapter is local.
+
+Portfolio target: Turl Street Group "Junior Data Engineer (Scraping & AI Agents)". Coverage map: `docs/job-requirements-map.md`. Every phase below must move a row in that map from ☐ to ☑. **Real public sources beat fixtures as proof**: fixtures are for tests and evals; the demo and README show real rows from real cities.
 
 Owner: Sajjad Hussain. Claude Code assists; the owner reviews and merges everything. Phase numbers in §7 are the single source of truth; every other reference uses them.
 
@@ -13,8 +15,8 @@ Owner: Sajjad Hussain. Claude Code assists; the owner reviews and merges everyth
 1. **Foundation works without AI.** Runtime, pipeline, quality checks and operations never depend on an LLM call. If the Anthropic API is down, scraping, ETL, checks and alerts keep running. Agents add adaptivity; they never paper over a weak scraper.
 2. **One network policy for every outbound request.** httpx requests go through `fetch/client.py` (`FetchClient`). Playwright traffic goes through `fetch/browser.py`, which shares the same per-host rate limiter, host allowlist, URL policy and circuit breaker, and uses `page.route` for logging and resource blocking. Adapters and generated code may not construct HTTP clients or browsers. Division of responsibility is in §1.1.
 3. **Never evade.** No proxy rotation, no CAPTCHA solving, no stealth plugins, no login walls, no paywalls. Anti-bot responses (403, 429, challenge pages, empty shells) are *detected and handled*: back off, open an incident, try the official API if one exists, otherwise mark the source `retired` with a note. A VPN is for the operator's own access, never a bypass.
-4. **Agents open PRs, humans merge.** No agent writes to `main`. The repair agent edits only its assigned `adapters/<source>/parse.py`. Trusted tests, golden fixtures, schemas, `fetch/`, politeness config and other adapters are human-owned. Max 3 repair attempts, then the source is marked `broken` and an `ops.incident` is opened.
-5. **Generated code runs in the sandbox first** (`docker/sandbox`): internal Docker network reaching only the fixture sites, read-only filesystem, no secrets mounted, memory and time limits. Live sites are reached only by the trusted worker through `FetchClient`, after human merge (ADR-0004).
+4. **Agents open PRs, humans merge.** No agent writes to `main`. The repair agent edits only its assigned site adapter (`adapters/sites/<source>/spec.yaml` or `parse.py`). Trusted tests, golden fixtures, schemas, `fetch/`, politeness config and other adapters are human-owned. Max 3 repair attempts, then the source is marked `broken` and an `ops.incident` is opened.
+5. **Generated code runs in the sandbox first** (`docker/sandbox`): `docker run --network none`, read-only filesystem, no secrets, `cap_drop ALL`, memory and time limits. `parse()` is pure, so the sandbox needs no network: saved raw files are mounted read-only as input. Live sites are reached only by the trusted worker through `FetchClient`, after human merge (ADR-0004).
 6. **Idempotent and incremental.** Re-running any job with the same inputs produces no duplicates. Every source has a watermark; backfills are explicit commands.
 7. **Raw is immutable.** Every fetched response is stored once under its SHA-256 before parsing. Anything downstream can be rebuilt from raw.
 8. **Provenance and identity on every row** (§4.1): `source_id`, `external_id`, `canonical_url`, `content_hash`, `schema_version`, `first_seen_at`, `last_seen_at`, `fetched_at`, `run_id`, `scraper_version_id`, `raw_sha256`.
@@ -36,7 +38,7 @@ config/sources/*.yaml ──► registry ──► scheduler (CLI until phase 7;
             ┌───────── fetch/: urlpolicy → limiter → client.py (httpx) │ browser.py (Playwright) ─────────┐
             └────────────────────────────────────────┬────────────────────────────────────────────────────┘
                                                      ▼
-                      store/raw.py  →  s3://raw/<source>/<yyyy>/<mm>/<dd>/<sha256>.<ext>  + raw.fetch_log
+                      store/raw.py  →  data/raw/<source>/<yyyy>/<mm>/<dd>/<sha256>.<ext> (S3 later) + raw.fetch_log
                                                      ▼
                       runtime pagination strategy → adapter.parse(raw) -> list[BaseModel]   (pure)
                                                      ▼
@@ -44,7 +46,7 @@ config/sources/*.yaml ──► registry ──► scheduler (CLI until phase 7;
                                                      ▼
                       quality: checks → drift detector → ops.incident → alert
                                                      ▼
-            agents (sandbox, fixtures only): generator / repairer → PR → deterministic tester → human merge
+            agents (offline sandbox, saved raw only): repairer / generator → PR → deterministic tester → human merge
                                                      ▼
                       serve (phase 8): FastAPI read API · Streamlit ops dashboard · MCP server
 ```
@@ -67,14 +69,21 @@ Adapter contract (`src/scrapeline/adapters/base.py`):
 ```python
 class Adapter(Protocol):
     source: SourceConfig
+
     def discover(self, since: Watermark) -> Iterator[Target]: ...   # may call FetchClient only
-    def fetch(self, target: Target, client: FetchClient) -> RawDoc: ...   # default impl in base; rarely overridden
-    def parse(self, raw: RawDoc) -> list[BaseModel]: ...   # pure, deterministic, no I/O; the only method agents may write
+    def fetch(self, target: Target, client: FetchClient) -> RawDoc: ...   # default impl in base
+    def parse(self, raw: RawDoc) -> list[BaseModel]: ...   # pure, deterministic, no I/O; the only part agents may write
 ```
+
+Two adapter kinds, same contract:
+- **Platform adapter** `adapters/platforms/<vendor>/` (e.g. `legistar`, `civicplus`): human-written, parameterised by `tenant` from YAML, serves many jurisdictions. Agents may *propose* repairs, but a platform adapter PR always gets a human review plus a regression run across every registered tenant of that platform.
+- **Site adapter** `adapters/sites/<source_id>/`: one custom site. Generator writes these; repairer fixes these.
+
+**Selectors first, code second.** A site adapter is preferably a declarative `spec.yaml` (record selector + per-field CSS selector, attribute, transform), executed by the generic `adapters/declarative.py`. Python `parse.py` is written only when the spec cannot express the page. Most drift is a changed selector, so most repairs become a one-line YAML diff: cheaper tokens, higher agent success, easy human review.
 
 ### 1.2 URL policy (SSRF)
 
-`fetch/urlpolicy.py` is applied to every URL: config entries, discovered links, document links, redirects, browser navigations. Rules: scheme `http`/`https` only; hostname must be on the source's allowlist (entry host plus explicitly listed document hosts); resolve DNS and reject loopback, private, link-local, multicast, reserved and cloud-metadata ranges; connect to the validated IP (pin) to defeat rebinding; revalidate after every redirect; cap redirect count. Rejections are logged with reason.
+`fetch/urlpolicy.py` is applied to every URL: config entries, discovered links, document links, redirects, browser navigations. Rules: scheme `http`/`https` only; hostname must be on the source's allowlist (entry host plus explicitly listed document hosts); resolve DNS and reject loopback, private, link-local, multicast, reserved and cloud-metadata ranges; revalidate after every redirect; cap redirect count. Rejections are logged with reason. Connecting to the validated IP (pinning, against DNS rebinding) needs a custom httpx transport; it is a **documented known gap in v1** (ADR-0005), not a blocker. Live sources are allowlisted, so the residual risk is low.
 
 ---
 
@@ -86,8 +95,8 @@ src/scrapeline/
   settings.py        pydantic-settings from .env
   registry/          load + validate config/sources/*.yaml; status machine draft→active→broken→retired
   fetch/             urlpolicy.py, limiter.py, robots.py, cache.py, client.py (httpx), browser.py (Playwright pool), pagination.py
-  store/             raw.py (MinIO/S3), db.py (SQLAlchemy engine, sessions)
-  adapters/          base.py; one package per source; generated/ for agent output awaiting review
+  store/             raw.py (filesystem now, S3 later), db.py (engine, sessions), tables.py (Core tables = migrations)
+  adapters/          base.py, declarative.py (spec.yaml engine); platforms/<vendor>/; sites/<source_id>/ (spec.yaml | parse.py)
   pipeline/          models.py (pydantic schemas, schema_version), normalise.py, identity.py, load.py, documents.py (PDF)
   quality/           checks.py, drift.py, incidents.py, antibot.py (block detection)
   ops/               queue.py (SKIP LOCKED), runs.py, logging.py (structlog JSON), metrics.py
@@ -96,7 +105,8 @@ src/scrapeline/
   evals/             runner.py, metrics.py, report.py
   serve/             api.py (FastAPI), dashboard.py (Streamlit), mcp.py
 alembic/             migrations (phase 2 onward)
-config/sources/      one YAML per source (see _example.yaml)
+config/sources/      one YAML per jurisdiction/source (see _example.yaml); platform sources need only platform + tenant
+tests/snapshots/     frozen copies of real public pages/API responses (used by tests and evals; no live calls)
 tests/
   unit/              pure tests, no docker, no network
   integration/       marked `integration`; needs `docker compose up`
@@ -106,7 +116,7 @@ tests/
 evals/benchmarks/    generation/ repair/ extraction/ cases; evals/results/ outputs
 dbt/                 phase 4, marts over normalised tables
 airflow/dags/        phase 7
-docker/              worker, sandbox, nginx
+docker/              app (one image: dev shell, CI, worker; Playwright base), sandbox (offline parser runner), nginx
 docs/                adr/, runbook/, job-requirements-map.md, ai-review-log.md, evals.md, ai-workflow.md, architecture.md
 ```
 
@@ -116,14 +126,18 @@ docs/                adr/, runbook/, job-requirements-map.md, ai-review-log.md, 
 
 | Concern | Choice | Notes |
 |---|---|---|
+| Container runtime | Kiri (owner's choice) or any Docker Engine API runtime (Docker Desktop, OrbStack, Colima) | Only standard `docker`/`docker compose` used. `make sandbox-check` proves isolation on the active runtime. |
+| Image | `mcr.microsoft.com/playwright/python:v<X>-noble`, tag = `playwright==` pin | browsers + deps preinstalled; Tesseract added |
 | Python | 3.12, `uv python install 3.12` | Not the system 3.15; Playwright and Airflow lag. CI runs 3.12. |
 | Packaging | uv + `uv.lock` committed, hatchling, `src/` layout | Explicit version floors in `pyproject.toml`; lockfile is the reproducible truth. |
 | HTTP | httpx + tenacity | only via `FetchClient` |
 | Browser | Playwright (Chromium), pool of 2 | no stealth; service workers blocked |
 | Parsing | selectolax first, BeautifulSoup allowed | |
 | Validation | pydantic v2 | every record is a model with `schema_version` |
+| Dataframes | pandas | quality checks, reports, exports. **Not** the load path: loads are pydantic-validated records + SQL upsert (pandas coerces None/NaN/dates silently) |
 | DB | PostgreSQL 16, SQLAlchemy 2, Alembic | every schema change = migration |
-| Raw store | MinIO (S3 API), boto3 | |
+| Raw store | Filesystem backend (`data/raw`, content-addressed) now; S3 backend (boto3, pinned server image) in step 6 | `RawStore` protocol; same key layout for both |
+| OCR | Tesseract (system package in worker image) via PyMuPDF OCR | phase 5 |
 | Analytics | DuckDB + Parquet, dbt-postgres | phase 4 |
 | Orchestration | CLI, then Airflow 3 LocalExecutor | phase 7 |
 | LLM | Anthropic Python SDK ≥1.1 behind `agents/llm.py` (ADR-0002) | tool runner + `messages.parse`; smoke test for beta surface |
@@ -148,8 +162,8 @@ Upgrade process: SDK or framework major bump = branch, run `tests/unit/test_llm_
 | Migration | Tables |
 |---|---|
 | 0001 (phase 2) | `sources`, `scrapers`, `scraper_versions`, `ops.run`, `ops.job`, `raw.fetch_log` |
-| 0002 (phase 3) | `jurisdictions`, `meetings`, `agenda_items`, `documents`, `pipeline.rejects` |
-| 0003 (phase 4) | `ops.check_result`, `ops.incident`, `ops.metric_daily` |
+| 0002 (phase 3) | `jurisdictions`, `bodies` (council, committee, board), `meetings`, `agenda_items`, `documents`, `pipeline.rejects` |
+| 0003 (phase 4; `check_result` lands in step 2) | `ops.check_result`, `ops.incident`, `ops.metric_daily` |
 | 0004 (phase 6) | `ops.agent_run`, `ops.agent_tool_call`, `evals.run`, `evals.case_result` |
 
 Nothing may be read from a table that has no migration yet.
@@ -171,9 +185,9 @@ Nothing may be read from a table that has no migration yet.
 
 | Component | LLM | May write | Inputs |
 |---|---|---|---|
-| **Generator** | yes (Opus; Haiku for page-structure summary step) | `adapters/<source>/parse.py`, `tests/generated/<source>/` | source YAML + instruction, 3 sample pages captured by the trusted worker into the raw store, schema, golden rows if any |
-| **Repairer** | yes | `adapters/<source>/parse.py` only, plus proposals in `tests/generated/` | failing deterministic report, diff of old vs new raw sample, golden rows. Max 3 attempts, then `broken` + incident |
-| **Tester** | no | report only | runs adapter in sandbox against fixtures; trusted tests; schema validation; golden comparison; security checks (no new imports outside allowlist, no network calls, no file I/O); machine-readable JSON |
+| **Generator** | yes (Opus; Haiku for page-structure summary step) | `adapters/sites/<source>/spec.yaml` (or `parse.py`), `tests/generated/<source>/` | source YAML + instruction, 3 sample pages captured by the trusted worker into the raw store, schema, golden rows if any |
+| **Repairer** | yes | its site adapter's `spec.yaml`/`parse.py` only, plus proposals in `tests/generated/` | failing deterministic report, diff of old vs new raw sample, golden rows. Max 3 attempts, then `broken` + incident |
+| **Tester** | no | report only | runs the parser in the offline sandbox against saved raw files; trusted tests; schema validation; golden comparison; security checks (no new imports outside allowlist, no network calls, no file I/O); machine-readable JSON |
 | **Eval engine** | no | `evals.run`, `evals.case_result` | tester reports across benchmark cases; computes §5.4 metrics per prompt version |
 
 Agent tools (all in `agents/tools/`, each typed, path-restricted, logged to `ops.agent_tool_call`): `read_instruction(source_id)`, `read_raw_sample(source_id, n)`, `read_adapter(source_id)`, `write_adapter(source_id, code)`, `write_generated_test(source_id, code)`, `run_tester(source_id)`, `read_test_report(run_id)`, `read_golden(source_id)`. No shell, no generic file read, no network, no `.env`.
@@ -185,15 +199,17 @@ Agent tools (all in `agents/tools/`, each typed, path-restricted, logged to `ops
 - Page HTML, PDFs, API responses are untrusted data. System prompts state this; tools return content wrapped as data; any instruction found inside content is extracted or ignored, never followed.
 - Agents see only their assigned source. Tools reject other paths.
 - Every agent output is schema-validated (`messages.parse` or AST check for code) before being written anywhere.
-- Sandbox (ADR-0004): container on the internal `sandbox_net` network that contains only the fixture nginx; `read_only: true`, `tmpfs /tmp`, `cap_drop: ALL`, no `.env`, memory 1 GB, wall-clock limit per run. Offline mode is the only sandbox mode in v1; an egress proxy for live-site testing is deferred to a future ADR.
+- Sandbox (ADR-0004, revised): `docker run --network none --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --memory 1g --pids-limit 128`, no `.env`, wall-clock limit per run. Input = adapter + raw samples mounted read-only; output = JSON on stdout. An egress proxy for live-site testing is deferred to a future ADR.
 
 ### 5.4 Eval metrics (per prompt version and model)
 
-Generation success rate · first-attempt deterministic pass rate · extraction field accuracy vs golden · false success rate · repair success rate · regression rate after repair · average repair attempts · human PR acceptance rate · agent tool-call failure rate · tokens and cost per run · cost per successful generation or repair. Benchmarks: 10 generation cases (fixture sites + variants), 20 drift cases, 40-document extraction set. Results summary committed to `docs/evals.md`.
+Generation success rate · first-attempt deterministic pass rate · extraction field accuracy vs golden · false success rate · repair success rate · regression rate after repair · average repair attempts · human PR acceptance rate · agent tool-call failure rate · tokens and cost per run · cost per successful generation or repair. Benchmarks v1: 5 generation, 10 drift, 20-document extraction; grow to 10/20/40 once the loop is stable. At least half of each set comes from **real-page snapshots** (`tests/snapshots/`, frozen real city pages and mutations of them), not only synthetic fixtures; synthetic-only evals are too easy to be evidence. Results summary committed to `docs/evals.md`.
 
 ### 5.5 Source instruction format (universal; human or agent)
 
 ```yaml
+platform: legistar              # legistar | civicplus | ... | custom  (custom = site adapter)
+tenant: seattle                 # platform client id; omitted for custom
 instruction:
   collect: "All city council meetings with date, title, location, agenda PDF link"
   schema: Meeting                 # existing pydantic model, or `new: MeetingV2` with fields listed
@@ -208,7 +224,21 @@ instruction:
   fields_excluded: [attendees, contact_email, phone, signatures]
 ```
 
-Generator flow: instruction → worker captures 3 sample pages to raw → cheap-model structure summary → `parse.py` + generated tests → sandbox tester → PR with `ops.agent_run.id`. Any site, any country; nothing is hard-coded to US government pages. A US-based reviewer can register government sites without code changes.
+Site adapter spec (`adapters/sites/<source>/spec.yaml`, what the generator writes first):
+
+```yaml
+schema: Meeting
+record: "table.meetings tbody tr"            # one match = one record
+fields:
+  title:        {css: "td.title"}
+  meeting_date: {css: "td.date", transform: date}
+  location:     {css: "td.location", optional: true}
+  agenda_url:   {css: "a.agenda", attr: href, transform: absolute_url, optional: true}
+  external_id:  {css: "a.detail", attr: href, transform: absolute_url}
+next_page: {css: "a[rel=next]", attr: href}   # used by the runtime next-link strategy
+```
+
+Generator flow: instruction → worker captures 3 sample pages to raw → cheap-model structure summary → `spec.yaml` (or `parse.py`) + generated tests → sandbox tester → PR with `ops.agent_run.id`. Any site, any country; nothing is hard-coded to US government pages. A US-based reviewer can register government sites without code changes.
 
 ---
 
@@ -238,11 +268,26 @@ Generator flow: instruction → worker captures 3 sample pages to raw → cheap-
 | 7 | Airflow, orchestration, deployment |
 | 8 | API, dashboard, MCP, portfolio release |
 
-A phase is complete only when its code and tests exist and CI is green. Do not start phase 6 before phases 2–4 are complete.
+A phase is complete only when its code and tests exist and CI is green.
+
+### 7.0 Build order: steps (how phases are actually worked)
+
+Phases group capabilities; **steps set the order**. Each step ships a working end-to-end demo on its own branch with CI green before the next starts. Build the thinnest version of each phase item the step needs; finish the rest later. Do not start step 4 (agents) before steps 2 and 3 work. Repair agent comes before generator: it is easier to measure and maps to "find the cause of broken or drifting scrapers".
+
+| Step | Goal (demoable result) | Phase items pulled in |
+|---|---|---|
+| **1 — Docker base** | `make up` (postgres + fixtures) on Kiri; app image on Playwright base; settings, logging, CLI, pre-commit, CI | 0 (all) |
+| **2 — Real data end to end** | `scrapeline run legistar-<city>` for 3 real cities → raw store → `meetings` + `bodies` in Postgres; run twice = same counts; README shows real rows | 2: `urlpolicy` (no pinning), `limiter`, `robots`, `client.py`, `store/raw.py`, `adapters/base.py`, registry, Legistar platform adapter, migration 0001; 3: models, identity, load, watermark, rejects, migration 0002; 4: count-range, null-rate, duplicate checks (pandas) → `ops.check_result` |
+| **3 — HTML, browser, documents, anti-bot** | CivicPlus AgendaCenter platform adapter (HTML + pagination + agenda PDFs) on real cities; Playwright on `js-table`; 403/429 detected not evaded | 1: static-list, js-table, pdf-archive, blocked fixtures + golden; 2: `browser.py`, `pagination.py`, `antibot.py`, `ops/queue.py` + worker; 5: PDF text + page count (OCR flag); `tests/snapshots/` of real pages |
+| **4 — Drift, repair agent, evals** (headline) | Mutated snapshot breaks an adapter → drift incident → repairer opens PR → tester passes/fails it deterministically → eval table in `docs/evals.md` | 4: `drift.py`, incidents, migration 0003, runbook; 1: drift cases (real snapshot mutations first); 6: `llm.py`, tools, tester, offline sandbox, `declarative.py` + site specs, repairer, migration 0004, evals, review log (≥2 rejected, ≥2 accepted) |
+| **5 — Generator for long tail** | Register a custom city site by instruction only → generator PR → human review → live `draft` run | 6: generator + prompt + generation evals |
+| **6 — Ship** | `make demo` in under 5 minutes; README proof table; job map all ☑ | 4: dbt marts; 7: Airflow DAGs (or documented cron fallback); 8: FastAPI; S3 raw backend; cut list applies to the rest |
+
+Real-source rules: register only official/public endpoints; fill the `legal:` block first; test reachability from the operator's location early (US geo-blocks happen; fallback is the US CI runner, never a proxy).
 
 ### Phase 0 — Skeleton
 - [ ] `git init`, first commit; GitHub repo `scrapeline`, `main` protected (PR only).
-- [ ] `make setup` succeeds (`uv.lock` committed); `make up` brings postgres, minio, fixtures healthy.
+- [ ] `make setup` succeeds (`uv.lock` committed); `make up` brings postgres + fixtures healthy on Kiri; `make image` builds the Playwright-based app image; `make sandbox-check` passes.
 - [ ] `settings.py`, `ops/logging.py`, `cli.py` with `scrapeline --help`.
 - [ ] Pre-commit: ruff, mypy. CI green on an empty test. `docs/ai-workflow.md` written.
 
@@ -264,7 +309,9 @@ A phase is complete only when its code and tests exist and CI is green. Do not s
 - [ ] `quality/antibot.py`: detect 403/429/challenge shells/empty renders → backoff + incident, never retry past policy.
 - [ ] `store/raw.py`; `ops/queue.py` (SKIP LOCKED, lease, heartbeat, dead-letter); `scrapeline worker`.
 - [ ] `adapters/base.py` + `registry/` with status machine.
-- [ ] Hand-written adapters for the 4 base fixture sites; integration tests green.
+- [ ] Platform adapters: Legistar Web API (step 2) and CivicPlus AgendaCenter (step 3), each registered for ≥3 real jurisdictions with snapshot tests.
+- [ ] Hand-written site adapters for the 4 base fixture sites; integration tests green.
+- [ ] ADR-0005: URL policy v1 scope (IP pinning deferred, reasons, residual risk).
 - [ ] Migration 0001.
 
 ### Phase 3 — Pipeline
@@ -289,9 +336,9 @@ A phase is complete only when its code and tests exist and CI is green. Do not s
 - [ ] `agents/llm.py` wrapper + `tests/unit/test_llm_smoke.py` (marked `llm`).
 - [ ] `agents/tools/`: eight tools, path-restricted, logged to `ops.agent_tool_call`.
 - [ ] `agents/tester.py` deterministic: sandbox run, trusted tests, golden, security checks, JSON report.
-- [ ] Sandbox Dockerfile + `sandbox_net` (ADR-0004).
+- [ ] Sandbox Dockerfile, offline `docker run --network none` (ADR-0004 revised).
 - [ ] `agents/generator.py` + `prompts/generator.v1.md`; `agents/repairer.py` + `prompts/repairer.v1.md` (3 attempts, scope-limited, escalates).
-- [ ] Migration 0004. `evals/` computing §5.4 metrics over 10 generation + 20 drift cases; `docs/evals.md` filled.
+- [ ] Migration 0004. `evals/` computing §5.4 metrics over 5 generation + 10 drift cases (v1); `docs/evals.md` filled.
 - [ ] `docs/ai-review-log.md`: ≥2 agent PRs rejected with reasons, ≥2 accepted.
 
 ### Phase 7 — Orchestration and deploy
@@ -306,7 +353,7 @@ A phase is complete only when its code and tests exist and CI is green. Do not s
 - [ ] `scripts/demo.sh` end to end; README with diagram, metrics table, ADR index, production-grade proof table.
 - [ ] `docs/job-requirements-map.md` all ☑; resume and portfolio updated.
 
-Cut order if time runs out: Streamlit → Airflow → dbt → MCP. Never cut phases 1–4 and 6.
+Cut order if time runs out: MCP → Streamlit → Airflow (keep a documented cron fallback) → dbt. Never cut steps 1–4 (phases 0–4 and 6).
 
 ---
 
@@ -326,4 +373,4 @@ Cut order if time runs out: Streamlit → Airflow → dbt → MCP. Never cut pha
 13. No secrets in the repo; no new network path outside `fetch/`.
 
 ## 9. Commands
-`make setup` · `make up` · `make test` · `make test-int` · `make lint` · `make type` · `make migrate` · `make eval` · `make demo` · `scrapeline --help`
+`make setup` · `make up` · `make image` · `make shell` · `make sandbox-check` · `make test` · `make test-int` · `make lint` · `make type` · `make migrate` · `make eval` · `make demo` · `scrapeline --help`
