@@ -279,3 +279,82 @@ metric_daily = Table(
     Column("value", Float, nullable=False),
     schema="ops",
 )
+
+# --- 0004: agents and evals --------------------------------------------------------------------
+
+agent_run = Table(
+    "agent_run",
+    metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column("role", String(20), nullable=False),  # repair | generate
+    Column("source_id", String(100), nullable=False),
+    Column("case_id", String(100)),
+    Column("eval_run_id", UUID(as_uuid=True)),
+    Column("model", String(100), nullable=False),
+    Column("prompt_version", String(50), nullable=False),
+    Column("attempt", Integer, nullable=False),
+    Column("iterations", Integer, nullable=False, server_default="0"),
+    Column("input_tokens", Integer, nullable=False, server_default="0"),
+    Column("output_tokens", Integer, nullable=False, server_default="0"),
+    Column("cache_read_tokens", Integer, nullable=False, server_default="0"),
+    Column("cache_write_tokens", Integer, nullable=False, server_default="0"),
+    Column("cost_usd", Float, nullable=False, server_default="0"),
+    Column("outcome", String(30), nullable=False),  # passed | failed | budget_exceeded | error
+    Column("tools_called", JSONB, nullable=False, server_default="[]"),
+    Column("error", Text),
+    _ts("started_at", default=True),
+    _ts("finished_at", nullable=True),
+    schema="ops",
+)
+
+agent_tool_call = Table(
+    "agent_tool_call",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("agent_run_id", UUID(as_uuid=True), ForeignKey("ops.agent_run.id"), nullable=False),
+    Column("seq", Integer, nullable=False),
+    Column("tool", String(50), nullable=False),
+    Column("args", JSONB, nullable=False, server_default="{}"),
+    Column("ok", Integer, nullable=False),
+    Column("error", Text),
+    Column("duration_ms", Integer, nullable=False, server_default="0"),
+    _ts("created_at", default=True),
+    schema="ops",
+)
+
+eval_run = Table(
+    "run",
+    metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column("suite", String(30), nullable=False),
+    Column("driver", String(30), nullable=False),
+    Column("model", String(100)),
+    Column("prompt_version", String(50)),
+    Column("summary", JSONB, nullable=False, server_default="{}"),
+    _ts("started_at", default=True),
+    _ts("finished_at", nullable=True),
+    schema="evals",
+)
+
+eval_case_result = Table(
+    "case_result",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("eval_run_id", UUID(as_uuid=True), ForeignKey("evals.run.id"), nullable=False),
+    Column("case_id", String(100), nullable=False),
+    Column("passed", Integer, nullable=False),
+    Column("repair_needed", Integer, nullable=False),
+    Column("attempts", Integer, nullable=False),
+    Column("first_attempt_pass", Integer, nullable=False),
+    Column("false_success", Integer, nullable=False),
+    Column("regression", Integer, nullable=False),
+    Column("field_accuracy_before", Float),
+    Column("field_accuracy_after", Float),
+    Column("tool_calls", Integer, nullable=False, server_default="0"),
+    Column("tool_errors", Integer, nullable=False, server_default="0"),
+    Column("tokens", Integer, nullable=False, server_default="0"),
+    Column("cost_usd", Float, nullable=False, server_default="0"),
+    Column("details", JSONB, nullable=False, server_default="{}"),
+    _ts("created_at", default=True),
+    schema="evals",
+)

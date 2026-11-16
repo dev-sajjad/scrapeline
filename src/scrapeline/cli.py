@@ -16,7 +16,31 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 source_app = typer.Typer(help="Inspect and manage registered sources.", no_args_is_help=True)
+agent_app = typer.Typer(
+    help="AI agents (repair). Agents open branches; humans merge.", no_args_is_help=True
+)
+eval_app = typer.Typer(help="Agent evals over benchmark cases.", no_args_is_help=True)
+drift_app = typer.Typer(help="Drift diagnosis (deterministic).", no_args_is_help=True)
 app.add_typer(source_app, name="source")
+app.add_typer(agent_app, name="agent")
+app.add_typer(eval_app, name="eval")
+app.add_typer(drift_app, name="drift")
+
+
+def _driver(name: str) -> Any:
+    from scrapeline.agents.llm import AnthropicDriver, NoopDriver
+    from scrapeline.settings import get_settings
+
+    settings = get_settings()
+    if name == "noop":
+        return NoopDriver()
+    if name != "anthropic":
+        raise typer.BadParameter("driver must be 'anthropic' or 'noop'")
+    if settings.anthropic_api_key is None:
+        raise typer.BadParameter(
+            "ANTHROPIC_API_KEY is not set (.env); use --driver noop for a baseline"
+        )
+    return AnthropicDriver(settings, settings.model_repair, max_usd=settings.agent_max_usd_per_run)
 
 
 def _echo(data: Any) -> None:
@@ -184,6 +208,74 @@ def documents(
             runner.engine, client, runner.raw_store, source_id=cfg.id, limit=limit
         )
     _echo({"source_id": cfg.id, **stats})
+
+
+@drift_app.command("diagnose")
+def drift_diagnose(
+    source_id: str, case: str = typer.Option(..., help="Directory of new pages.")
+) -> None:
+    """Which selectors of the source's spec stop matching on the given pages."""
+    from pathlib import Path
+
+    from scrapeline.adapters.declarative import SiteSpec, spec_path_for
+    from scrapeline.quality.drift import diagnose
+
+    spec = SiteSpec.from_yaml(spec_path_for(source_id).read_text())
+    _echo(diagnose(spec, (Path(case) / "index.html").read_text()))
+
+
+@agent_app.command("repair")
+def agent_repair(
+    source_id: str,
+    case: str = typer.Option(..., help="Directory with the captured (drifted) pages."),
+    driver: str = typer.Option("anthropic", help="anthropic | noop"),
+    apply: bool = typer.Option(False, help="Commit the repaired spec on a new agent/* branch."),
+    local_sandbox: bool = typer.Option(False, help="Run the tester in-process (no docker)."),
+) -> None:
+    """Repair a broken declarative adapter (max 3 attempts, then source -> broken)."""
+    from pathlib import Path
+
+    from scrapeline.agents.repairer import repair_case
+    from scrapeline.settings import get_settings
+    from scrapeline.store.db import get_engine
+
+    result = repair_case(
+        source_id,
+        Path(case),
+        driver=_driver(driver),
+        settings=get_settings(),
+        engine=get_engine(),
+        apply=apply,
+        sandbox_mode="local" if local_sandbox else "docker",
+    )
+    _echo(result.as_dict())
+    if not result.passed:
+        raise typer.Exit(code=1)
+
+
+@eval_app.command("run")
+def eval_run(
+    suite: str = typer.Option("repair", help="Only 'repair' in v1."),
+    driver: str = typer.Option("anthropic", help="anthropic | noop (baseline, no LLM)"),
+    limit: int = typer.Option(None, help="Run only the first N cases."),
+    local_sandbox: bool = typer.Option(False, help="Run the tester in-process (no docker)."),
+    no_db: bool = typer.Option(False, help="Do not write evals.* / ops.agent_run rows."),
+) -> None:
+    """Run the repair benchmark (tests/sites/drift) and print §5.4 metrics."""
+    from scrapeline.evals.runner import run_repair_suite
+    from scrapeline.settings import get_settings
+    from scrapeline.store.db import get_engine
+
+    if suite != "repair":
+        raise typer.BadParameter("only --suite repair exists in v1")
+    result = run_repair_suite(
+        driver=_driver(driver),
+        settings=get_settings(),
+        engine=None if no_db else get_engine(),
+        limit=limit,
+        sandbox_mode="local" if local_sandbox else "docker",
+    )
+    typer.echo(result.markdown())
 
 
 @app.command()

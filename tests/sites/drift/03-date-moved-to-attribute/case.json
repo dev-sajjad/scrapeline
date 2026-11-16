@@ -1,0 +1,8 @@
+{
+ "case": "03-date-moved-to-attribute",
+ "base_site": "static-list",
+ "source_id": "fixture-static-list",
+ "description": "visible date replaced by text; ISO-ish value in <time datetime>",
+ "breaks_reference_spec": true,
+ "golden": "static-list"
+}

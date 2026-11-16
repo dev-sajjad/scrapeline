@@ -49,7 +49,7 @@ migrate:
 	uv run alembic upgrade head
 
 eval:           ## agent evals (costs money; prints usage)
-	uv run scrapeline eval run --suite repair
+	uv run scrapeline eval run --suite repair --driver anthropic
 
 demo:
 	bash scripts/demo.sh

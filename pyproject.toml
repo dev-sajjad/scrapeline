@@ -68,6 +68,8 @@ ignore = ["S101"]
 "tests/**" = ["S", "T20"]
 "alembic/**" = ["N", "E501"]
 "scripts/**" = ["T20", "S", "E501"]
+"src/scrapeline/agents/**" = ["E501"]  # prompt/report strings
+"src/scrapeline/evals/**" = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"

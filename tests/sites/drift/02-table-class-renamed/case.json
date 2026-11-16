@@ -1,0 +1,8 @@
+{
+ "case": "02-table-class-renamed",
+ "base_site": "static-list",
+ "source_id": "fixture-static-list",
+ "description": "table.meetings renamed to table.meeting-table",
+ "breaks_reference_spec": true,
+ "golden": "static-list"
+}

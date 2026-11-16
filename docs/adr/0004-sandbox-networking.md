@@ -1,16 +1,21 @@
-# ADR-0004: Sandbox for generated code uses a fixtures-only internal network
+# ADR-0004: Agent-generated parsers run in an offline sandbox (revised)
 
-Status: accepted · Date: 2026-11-14
+Status: accepted · Date: 2026-11-14 · Revised: 2026-11-17
 
 ## Context
-Agent-generated adapters must run somewhere before a human reviews them. The first scaffold said `network_mode: none` "except an allow-listed host", which is contradictory: a container with no network cannot reach any host. Options were an egress proxy with destination allowlists, or an internal network that holds only the fixture sites.
+Agent-written adapter code must run before a human reviews it. The first version put the sandbox on an internal Docker network that contained only the fixture nginx. Since then the adapter contract made `parse()` pure (bytes in, records out) and agents only write `parse` logic (a `spec.yaml` first, `parse.py` only when needed). Parsing never needs a network.
 
 ## Decision
-The sandbox container joins `sandbox_net` (`internal: true`), which contains only the fixture nginx. It has no route to the internet, no `.env`, a read-only filesystem, `cap_drop: ALL`, a memory limit and a per-run wall-clock limit. Generated code is tested there against fixture sites and golden data only. Live sites are reached solely by the trusted worker through `FetchClient`, after a human merges the PR, and a source becomes `active` only after a live run passes quality checks. Repair agents read new page samples from the raw store captured by the worker; they never fetch live.
+The tester runs generated parsers with:
+`docker run --rm --network none --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --memory 1g --pids-limit 128 -v <case>:/work:ro scrapeline-sandbox`
+The image (`docker/sandbox/Dockerfile`) contains only the pure modules (models, normalise, identity, rawdoc, declarative engine) and a harness that reads `/work/input.json` and prints one JSON report. No fetch/, store/, settings, DB driver, secrets or `.env`. Sample pages come from the raw store, captured by the trusted worker. Pagination is followed offline by mapping next-page URLs to captured files.
+
+`scripts/sandbox_check.sh` (`make sandbox-check`, CI job `image`) proves on the active runtime (Kiri, Docker Desktop, ...) that egress and DNS fail, the root FS is read-only, the user is non-root and no secrets are present. A runtime that accepts flags without enforcing them fails this check.
 
 ## Alternatives
-- **Egress proxy** (Squid/tinyproxy with DNS/IP validation, allowlists, logging): lets agents test against live sites, but adds a component with its own security surface and maintenance for a solo developer. Deferred; revisit via a new ADR if agent runs against live pages become necessary.
-- **No sandbox, run in worker**: generated code would get network and DB access before review. Rejected.
+- **Internal network with fixture nginx** (v1 of this ADR): more moving parts, and network reach that pure parsing does not need. Superseded.
+- **Egress proxy for live-site testing**: deferred; live sites are reached only by the trusted worker after human merge.
+- **In-process run** (`--local-sandbox`): used for unit tests and fast local loops only; never the release gate.
 
 ## Consequences
-Two release gates instead of one (fixtures, then live in `draft`). Simpler and safer. Drift repair depends on the worker having captured the changed page into raw, which the drift detector already does.
+Release gates: (1) offline sandbox + golden pass, (2) security checks (schema-validated spec; AST allowlist for any `parse.py`), (3) human PR review and merge, (4) live `draft` run by the trusted worker, (5) checks pass → `active`.

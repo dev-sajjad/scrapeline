@@ -1,0 +1,8 @@
+{
+ "case": "01-title-class-renamed",
+ "base_site": "static-list",
+ "source_id": "fixture-static-list",
+ "description": "td.title renamed to td.meeting-name",
+ "breaks_reference_spec": true,
+ "golden": "static-list"
+}

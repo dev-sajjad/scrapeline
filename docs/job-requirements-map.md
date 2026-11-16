@@ -6,11 +6,11 @@ Source posting: Turl Street Group, "Junior Data Engineer (Scraping & AI Agents)"
 | Posting line | Proof | Phase | Status |
 |---|---|---|---|
 | Write and maintain scrapers for government websites, document portals, meeting archives (Playwright, Python) | hand-written adapters for 4 fixture sites + real public sources registered via YAML; `fetch/browser.py` Playwright pool | 2 | ☑ Legistar platform adapter, 3 real cities (step 2); HTML/Playwright in step 3 |
-| Contribute to agents that generate, test and repair scrapers | `agents/generator.py`, `agents/repairer.py`, deterministic `agents/tester.py` | 6 | ☐ |
+| Contribute to agents that generate, test and repair scrapers | `agents/generator.py`, `agents/repairer.py`, deterministic `agents/tester.py` | 6 | ☑ repair agent (tool runner, 8 scoped tools, 3-attempt bound, escalation) + deterministic offline-sandbox tester; generator in step 5 |
 | Review AI-generated code before it ships | PR template AI-review checklist; `docs/ai-review-log.md` with accepted and rejected agent PRs | 6 | ☐ |
 | Build data pipelines into storage and processing systems | raw store → `pipeline/` → PostgreSQL → dbt marts; watermarks, backfill, reprocess-from-raw | 3, 4 | ☑ raw store → pydantic → Postgres upsert, watermarks, backfill, reprocess-from-raw |
-| Run data quality checks, find cause of broken/drifting scrapers, fix them | `quality/checks.py`, `quality/drift.py`, `ops.incident`, runbook, bounded repair | 4, 6 | ☐ |
-| Improve prompts, tools and evaluation checks | versioned `agents/prompts/`, `agents/tools/`, `evals/` with 11 metrics per prompt version, `docs/evals.md` | 6 | ☐ |
+| Run data quality checks, find cause of broken/drifting scrapers, fix them | `quality/checks.py`, `quality/drift.py`, `ops.incident`, runbook, bounded repair | 4, 6 | ☑ checks → incidents; `drift diagnose` names broken selectors; repair agent + runbooks |
+| Improve prompts, tools and evaluation checks | versioned `agents/prompts/`, `agents/tools/`, `evals/` with 11 metrics per prompt version, `docs/evals.md` | 6 | ☑ versioned `prompts/repairer.v1.md`, typed tools, `eval run` with §5.4 metrics, docs/evals.md |
 | Collaborate with senior engineers on pipeline design and reliability | ADRs, PR-only workflow, runbook, architecture doc | all | ☐ |
 
 ## Required skills
@@ -22,13 +22,13 @@ Source posting: Turl Street Group, "Junior Data Engineer (Scraping & AI Agents)"
 | Read unfamiliar code fast, judge critically, never merge what you don't understand | AI-review checklist, rejected agent PRs with reasons | 6 | ☐ |
 | ETL concepts and basic data modelling | identity/content-hash model, schema_version, dims and facts | 3, 4 | ☑ identity + content-hash change detection, lineage columns, schema_version |
 | Git and normal code review workflow | protected main, Conventional Commits, PR template, CI | 0 | ☑ branch per step, Conventional Commits, CI, PR template |
-| Problem-solving and debugging | incident → runbook → fix traceable in git history | 4 | ☐ |
+| Problem-solving and debugging | incident → runbook → fix traceable in git history | 4 | ☑ incidents → runbooks; 10+ caught defects with root cause in docs/ai-review-log.md |
 
 ## Nice to have
 | Posting line | Proof | Phase | Status |
 |---|---|---|---|
-| LLM agents / tool-calling workflows | Anthropic SDK tool runner (ADR-0002), eight narrow tools | 6 | ☐ |
-| Evals or test harnesses for LLM output | `evals/` benchmarks and metrics; golden-based grading | 6 | ☐ |
+| LLM agents / tool-calling workflows | Anthropic SDK tool runner (ADR-0002), eight narrow tools | 6 | ☑ Anthropic SDK `tool_runner` + `@beta_tool`, usage/cost logged to ops.agent_run |
+| Evals or test harnesses for LLM output | `evals/` benchmarks and metrics; golden-based grading | 6 | ☑ 10-case drift benchmark, golden grading, false-success and regression metrics |
 | PostgreSQL, Docker | Postgres 16 schema; Compose dev/prod/agents profiles; sandbox (ADR-0004) | 0–6 | ☑ Postgres 16 + Alembic; Playwright-based app image; offline sandbox with isolation check |
 | Kafka, Kubernetes | Out of scope by ADR-0003; reason documented | n/a | n/a |
 | PDF and document extraction, OCR | `pipeline/documents.py`, pymupdf, OCR flag, 40-doc golden set | 5 | ☑ PyMuPDF text, image-only PDF → needs_ocr, Tesseract OCR in docker image; LLM extraction in step 4+ |
