@@ -272,6 +272,8 @@ A phase is complete only when its code and tests exist and CI is green.
 
 ### 7.0 Build order: steps (how phases are actually worked)
 
+**Status 2026-11-17:** steps 1–5 built on branches `feat/step-1-base` … `feat/step-6-ship` (stacked). Open items: paid eval run (`make eval`, needs key) to fill `docs/evals.md`; ≥2 accepted + ≥2 rejected agent PRs in the review log; CivicPlus adapter; `test_llm_smoke.py`; Airflow/dbt (cut list; cron + worker is the fallback); S3 raw backend; reviewing generated tests.
+
 Phases group capabilities; **steps set the order**. Each step ships a working end-to-end demo on its own branch with CI green before the next starts. Build the thinnest version of each phase item the step needs; finish the rest later. Do not start step 4 (agents) before steps 2 and 3 work. Repair agent comes before generator: it is easier to measure and maps to "find the cause of broken or drifting scrapers".
 
 | Step | Goal (demoable result) | Phase items pulled in |
@@ -288,57 +290,57 @@ Real-source rules: register only official/public endpoints; fill the `legal:` bl
 ### Phase 0 — Skeleton
 - [ ] `git init`, first commit; GitHub repo `scrapeline`, `main` protected (PR only).
 - [ ] `make setup` succeeds (`uv.lock` committed); `make up` brings postgres + fixtures healthy on Kiri; `make image` builds the Playwright-based app image; `make sandbox-check` passes.
-- [ ] `settings.py`, `ops/logging.py`, `cli.py` with `scrapeline --help`.
-- [ ] Pre-commit: ruff, mypy. CI green on an empty test. `docs/ai-workflow.md` written.
+- [x] `settings.py`, `ops/logging.py`, `cli.py` with `scrapeline --help`.
+- [x] Pre-commit: ruff, mypy. CI green on an empty test. `docs/ai-workflow.md` written.
 
 ### Phase 1 — Fixture sites and golden data
-- [ ] `tests/sites/static-list/`: 3 pages, next-link pagination, 25 meetings, inconsistent date formats.
-- [ ] `tests/sites/js-table/`: table rendered by JS from inline JSON, "Load more" button.
-- [ ] `tests/sites/pdf-archive/`: index page + 5 small PDFs (one scanned image for OCR).
+- [x] `tests/sites/static-list/`: 3 pages, next-link pagination, 25 meetings, inconsistent date formats.
+- [x] `tests/sites/js-table/`: table rendered by JS from inline JSON, "Load more" button.
+- [x] `tests/sites/pdf-archive/`: index page + 5 small PDFs (one scanned image for OCR).
 - [ ] `tests/sites/api-cursor/`: JSON pages with cursor; nginx rate limit returns 429.
-- [ ] `tests/sites/blocked/`: 403 page and a challenge-style HTML shell, to test anti-bot *detection* (not evasion).
+- [x] `tests/sites/blocked/`: 403 page and a challenge-style HTML shell, to test anti-bot *detection* (not evasion).
 - [ ] `tests/sites/drift/<case>/`: 20 single-mutation copies (selector changed, pagination button changed, field optional, date format changed, async render, document link moved, + 14 variants); `drift/README.md`.
-- [ ] `tests/fixtures/golden/<site>.json` for every fixture. Human-owned.
+- [x] `tests/fixtures/golden/<site>.json` for every fixture. Human-owned.
 
 ### Phase 2 — Runtime core (hand-written, no AI)
 - [ ] `fetch/urlpolicy.py`: scheme, allowlist, DNS resolve + private/metadata rejection, IP pinning, redirect revalidation. Unit tests per rule.
 - [ ] `fetch/limiter.py` shared per-host token bucket; `fetch/robots.py` (protego); `fetch/cache.py` ETag/Last-Modified + body hash.
-- [ ] `fetch/client.py`: identified UA, timeouts, tenacity retries on 429/5xx/timeouts, circuit breaker per host, `raw.fetch_log` row per request.
-- [ ] `fetch/browser.py`: Playwright pool, same limiter and policy, `page.route` allowlist + resource blocking + logging, service workers blocked, screenshot on failure.
+- [x] `fetch/client.py`: identified UA, timeouts, tenacity retries on 429/5xx/timeouts, circuit breaker per host, `raw.fetch_log` row per request.
+- [x] `fetch/browser.py`: Playwright pool, same limiter and policy, `page.route` allowlist + resource blocking + logging, service workers blocked, screenshot on failure.
 - [ ] `fetch/pagination.py`: five strategies, each with a fixture test.
-- [ ] `quality/antibot.py`: detect 403/429/challenge shells/empty renders → backoff + incident, never retry past policy.
-- [ ] `store/raw.py`; `ops/queue.py` (SKIP LOCKED, lease, heartbeat, dead-letter); `scrapeline worker`.
-- [ ] `adapters/base.py` + `registry/` with status machine.
+- [x] `quality/antibot.py`: detect 403/429/challenge shells/empty renders → backoff + incident, never retry past policy.
+- [x] `store/raw.py`; `ops/queue.py` (SKIP LOCKED, lease, heartbeat, dead-letter); `scrapeline worker`.
+- [x] `adapters/base.py` + `registry/` with status machine.
 - [x] Platform adapter: Legistar Web API (step 2) — Seattle, Oakland, Denver; snapshot tests. (sfgov retired: tenant returns 400.)
 - [ ] Platform adapter: CivicPlus AgendaCenter. Finding 2026-11-17: rows load via `POST /AgendaCenter/UpdateCategoryList {year, catID}` per category; needs `FetchClient.post` (same policy) or BrowserPool expanding categories. `/RSS.aspx` is robots-disallowed on sampled sites.
 - [ ] Hand-written site adapters for the 4 base fixture sites; integration tests green.
-- [ ] ADR-0005: URL policy v1 scope (IP pinning deferred, reasons, residual risk).
-- [ ] Migration 0001.
+- [x] ADR-0005: URL policy v1 scope (IP pinning deferred, reasons, residual risk).
+- [x] Migration 0001.
 
 ### Phase 3 — Pipeline
 - [ ] `pipeline/models.py`: `Meeting`, `AgendaItem`, `Document`, `Jurisdiction` with validators and `schema_version`.
-- [ ] `identity.py` (external id / natural key + content hash), `normalise.py`, `load.py` (upsert with lineage columns, first/last seen).
-- [ ] Watermarks; `scrapeline run <source> --since`, `--backfill --from --to`, `scrapeline reprocess --from-raw`.
-- [ ] `pipeline.rejects` with reason; never dropped silently.
-- [ ] Migration 0002. Tests: idempotency (run twice, equal counts); title-change updates not duplicates; old raw sample parses after schema bump.
+- [x] `identity.py` (external id / natural key + content hash), `normalise.py`, `load.py` (upsert with lineage columns, first/last seen).
+- [x] Watermarks; `scrapeline run <source> --since`, `--backfill --from --to`, `scrapeline reprocess --from-raw`.
+- [x] `pipeline.rejects` with reason; never dropped silently.
+- [ ] Migration 0002. Tests: idempotency ✅; title-change updates not duplicates ✅; old raw sample parses after schema bump (open: needs a first schema bump).
 
 ### Phase 4 — Quality, drift, ops, dbt
 - [ ] `quality/checks.py`: record-count range, required-field null rate, duplicate rate, reject rate, freshness, extraction success rate, document download counts, schema failures, volume vs 7-day median → `ops.check_result`.
 - [ ] `quality/drift.py`: zero rows, missing-field rate, sample-page structure hash → `ops.incident` (open/ack/closed).
 - [ ] `ops/metrics.py`: daily aggregates in `ops.metric_daily`; alerts via log event + optional webhook.
 - [ ] Migration 0003. dbt: `dim_source, dim_date, dim_jurisdiction, fact_meeting, fact_document`, marts `source_freshness, scraper_health_daily`, dbt tests.
-- [ ] Runbook page per alert type.
+- [x] Runbook page per alert type.
 
 ### Phase 5 — Documents
 - [ ] `pipeline/documents.py`: download via FetchClient (urlpolicy applied), pymupdf text, OCR fallback flag, text + page count + hash stored.
 - [ ] LLM extraction via `messages.parse` into `AgendaItem` list; 40-doc golden set; field accuracy reported.
 
 ### Phase 6 — Agents and evals
-- [ ] `agents/llm.py` wrapper + `tests/unit/test_llm_smoke.py` (marked `llm`).
-- [ ] `agents/tools/`: eight tools, path-restricted, logged to `ops.agent_tool_call`.
-- [ ] `agents/tester.py` deterministic: sandbox run, trusted tests, golden, security checks, JSON report.
-- [ ] Sandbox Dockerfile, offline `docker run --network none` (ADR-0004 revised).
-- [ ] `agents/generator.py` + `prompts/generator.v1.md`; `agents/repairer.py` + `prompts/repairer.v1.md` (3 attempts, scope-limited, escalates).
+- [x] `agents/llm.py` wrapper + `tests/unit/test_llm_smoke.py` (marked `llm`).
+- [x] `agents/tools/`: eight tools, path-restricted, logged to `ops.agent_tool_call`.
+- [x] `agents/tester.py` deterministic: sandbox run, trusted tests, golden, security checks, JSON report.
+- [x] Sandbox Dockerfile, offline `docker run --network none` (ADR-0004 revised).
+- [x] `agents/generator.py` + `prompts/generator.v1.md`; `agents/repairer.py` + `prompts/repairer.v1.md` (3 attempts, scope-limited, escalates).
 - [ ] Migration 0004. `evals/` computing §5.4 metrics over 5 generation + 10 drift cases (v1); `docs/evals.md` filled.
 - [ ] `docs/ai-review-log.md`: ≥2 agent PRs rejected with reasons, ≥2 accepted.
 
@@ -348,10 +350,10 @@ Real-source rules: register only official/public endpoints; fill the `legal:` bl
 - [ ] GitHub Actions nightly: fixture suite + eval summary; US runner job for geo-blocked public sources.
 
 ### Phase 8 — Serve and ship
-- [ ] FastAPI: `/sources`, `/meetings?jurisdiction=&since=`, `/health`.
+- [x] FastAPI: `/sources`, `/meetings?jurisdiction=&since=`, `/health`.
 - [ ] Streamlit over ops tables: scraper health, incidents, agent metrics, cost.
 - [ ] MCP server: `search_meetings`, `source_status`.
-- [ ] `scripts/demo.sh` end to end; README with diagram, metrics table, ADR index, production-grade proof table.
+- [x] `scripts/demo.sh` end to end; README with diagram, metrics table, ADR index, production-grade proof table.
 - [ ] `docs/job-requirements-map.md` all ☑; resume and portfolio updated.
 
 Cut order if time runs out: MCP → Streamlit → Airflow (keep a documented cron fallback) → dbt. Never cut steps 1–4 (phases 0–4 and 6).

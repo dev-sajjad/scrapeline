@@ -1,8 +1,8 @@
-.PHONY: setup up down shell image sandbox-image sandbox-check test test-int test-browser lint fmt type check migrate eval demo
+.PHONY: setup up down shell image sandbox-image sandbox-check test test-int test-browser lint fmt type check migrate eval eval-baseline api demo
 
 setup:          ## one-time: python 3.12 venv + deps + chromium for local runs
 	uv python install 3.12
-	uv sync
+	uv sync --extra serve
 	uv run playwright install chromium
 	uv run pre-commit install
 
@@ -56,5 +56,8 @@ eval-baseline:  ## free baseline (no LLM) for both suites
 	uv run scrapeline eval run --suite repair --driver noop
 	uv run scrapeline eval run --suite generation --driver noop
 
-demo:
+api:            ## read API on :8000
+	uv run uvicorn scrapeline.serve.api:app --port 8000
+
+demo:           ## end-to-end demo (no API key needed)
 	bash scripts/demo.sh
