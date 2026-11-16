@@ -43,7 +43,7 @@ class Workspace:
     source_id: str
     root: Path  # data/agent/<run>/ : spec.yaml, tests/, reports
     pages_dir: Path  # captured raw sample pages (read-only for the agent)
-    golden_path: Path
+    golden_path: Path | None
     instruction: str
     settings: Settings
     sandbox_mode: SandboxMode = "docker"
@@ -114,13 +114,15 @@ def build_tool_functions(ws: Workspace) -> dict[str, Callable[..., str]]:
         Returns the source instruction and the allowed field names for the spec.
         """
         spec = SiteSpec.from_yaml(ws.spec_path.read_text())
-        fields = sorted(SCHEMAS[spec.schema_].model_fields)
+        model = SCHEMAS[spec.schema_]
+        fields = {n: str(f.annotation) for n, f in model.model_fields.items()}
         return json.dumps(
             {
                 "source_id": ws.source_id,
                 "instruction": ws.instruction,
                 "schema": spec.schema_,
                 "allowed_fields": fields,
+                "required": [n for n, f in model.model_fields.items() if f.is_required()],
             }
         )
 
@@ -205,6 +207,8 @@ def build_tool_functions(ws: Workspace) -> dict[str, Callable[..., str]]:
         Args:
             limit: Number of golden records to return (max 25).
         """
+        if ws.golden_path is None:
+            return "no golden rows exist for this source; the tester uses self-consistency checks"
         rows = load_golden(ws.golden_path, "http://localhost:8080")[: max(1, min(limit, 25))]
         return json.dumps(rows)
 

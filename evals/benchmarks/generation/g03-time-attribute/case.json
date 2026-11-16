@@ -1,0 +1,7 @@
+{
+ "case": "g03-time-attribute",
+ "pages": "tests/sites/drift/03-date-moved-to-attribute",
+ "golden": "tests/fixtures/golden/static-list.json",
+ "description": "Dates only machine-readable in <time datetime>",
+ "instruction": "Collect all public meetings with title, body name, date, start time, location, status (scheduled/cancelled) and agenda PDF link."
+}

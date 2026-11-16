@@ -248,28 +248,34 @@ def _git(*args: str) -> str:
     return proc.stdout.strip()
 
 
-def _open_branch(source_id: str, case_id: str, spec_file: Path, result: RepairResult) -> str:
-    """Commit the repaired spec on a new agent branch, then return to the original branch.
-
-    Never touches main; never pushes or merges. A human reviews the branch (PR template checklist).
-    """
+def commit_on_agent_branch(branch: str, files: dict[Path, str], message: str) -> str:
+    """Write files on a new agent/* branch, commit, switch back. Never main; never push/merge."""
+    if not branch.startswith("agent/"):
+        raise AgentError("agent branches must start with agent/")
     if _git("status", "--porcelain", "--untracked-files=no"):
         raise AgentError("working tree has uncommitted changes; refusing to create an agent branch")
     current = _git("rev-parse", "--abbrev-ref", "HEAD")
-    branch = f"agent/repair-{source_id}-{case_id}-{result.agent_run_ids[-1][:8]}"
     _git("switch", "-c", branch)
     try:
-        assert result.final_spec is not None
-        spec_file.write_text(result.final_spec)
-        _git("add", str(spec_file.relative_to(PROJECT_ROOT)))
-        body = (
-            f"fix(adapter): agent repair of {source_id} spec ({case_id})\n\n"
-            f"Agent run ids: {', '.join(result.agent_run_ids)}\n"
-            f"Attempts: {result.attempts}; cost USD: {result.cost_usd}; tester: passed.\n"
-            "Needs human review per .github/pull_request_template.md before merge."
-        )
-        _git("commit", "-m", body)
+        for path, content in files.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+            _git("add", str(path.relative_to(PROJECT_ROOT)))
+        _git("commit", "-m", message)
     finally:
         _git("switch", current)
+    return branch
+
+
+def _open_branch(source_id: str, case_id: str, spec_file: Path, result: RepairResult) -> str:
+    assert result.final_spec is not None
+    branch = f"agent/repair-{source_id}-{case_id}-{result.agent_run_ids[-1][:8]}"
+    message = (
+        f"fix(adapter): agent repair of {source_id} spec ({case_id})\n\n"
+        f"Agent run ids: {', '.join(result.agent_run_ids)}\n"
+        f"Attempts: {result.attempts}; cost USD: {result.cost_usd}; tester: passed.\n"
+        "Needs human review per .github/pull_request_template.md before merge."
+    )
+    commit_on_agent_branch(branch, {spec_file: result.final_spec}, message)
     shutil.rmtree(PROJECT_ROOT / "data" / "agent", ignore_errors=True)
     return branch

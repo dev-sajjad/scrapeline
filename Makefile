@@ -48,8 +48,13 @@ check:         ## lint + types + unit tests (pipefail-safe gate)
 migrate:
 	uv run alembic upgrade head
 
-eval:           ## agent evals (costs money; prints usage)
+eval:           ## agent evals: repair + generation (costs money; needs ANTHROPIC_API_KEY)
 	uv run scrapeline eval run --suite repair --driver anthropic
+	uv run scrapeline eval run --suite generation --driver anthropic
+
+eval-baseline:  ## free baseline (no LLM) for both suites
+	uv run scrapeline eval run --suite repair --driver noop
+	uv run scrapeline eval run --suite generation --driver noop
 
 demo:
 	bash scripts/demo.sh

@@ -6,7 +6,7 @@ Source posting: Turl Street Group, "Junior Data Engineer (Scraping & AI Agents)"
 | Posting line | Proof | Phase | Status |
 |---|---|---|---|
 | Write and maintain scrapers for government websites, document portals, meeting archives (Playwright, Python) | hand-written adapters for 4 fixture sites + real public sources registered via YAML; `fetch/browser.py` Playwright pool | 2 | ☑ Legistar platform adapter, 3 real cities (step 2); HTML/Playwright in step 3 |
-| Contribute to agents that generate, test and repair scrapers | `agents/generator.py`, `agents/repairer.py`, deterministic `agents/tester.py` | 6 | ☑ repair agent (tool runner, 8 scoped tools, 3-attempt bound, escalation) + deterministic offline-sandbox tester; generator in step 5 |
+| Contribute to agents that generate, test and repair scrapers | `agents/generator.py`, `agents/repairer.py`, deterministic `agents/tester.py` | 6 | ☑ repair + generator agents (tool runner, 8 scoped tools, 3-attempt bound, escalation, agent/* branches) + deterministic offline-sandbox tester |
 | Review AI-generated code before it ships | PR template AI-review checklist; `docs/ai-review-log.md` with accepted and rejected agent PRs | 6 | ☐ |
 | Build data pipelines into storage and processing systems | raw store → `pipeline/` → PostgreSQL → dbt marts; watermarks, backfill, reprocess-from-raw | 3, 4 | ☑ raw store → pydantic → Postgres upsert, watermarks, backfill, reprocess-from-raw |
 | Run data quality checks, find cause of broken/drifting scrapers, fix them | `quality/checks.py`, `quality/drift.py`, `ops.incident`, runbook, bounded repair | 4, 6 | ☑ checks → incidents; `drift diagnose` names broken selectors; repair agent + runbooks |

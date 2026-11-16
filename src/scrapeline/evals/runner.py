@@ -166,3 +166,111 @@ def run_repair_suite(
         )
     )
     return suite
+
+
+GEN_DIR = PROJECT_ROOT / "evals" / "benchmarks" / "generation"
+
+
+def run_generation_suite(
+    *,
+    driver: AgentDriver,
+    settings: Settings,
+    engine: Engine | None = None,
+    cases_dir: Path = GEN_DIR,
+    limit: int | None = None,
+    sandbox_mode: SandboxMode = "docker",
+) -> dict[str, Any]:
+    """Generate specs from scratch (agent sees no golden rows); grade the result with golden."""
+    from scrapeline.agents.generator import PROMPT_VERSION as GEN_PROMPT
+    from scrapeline.agents.generator import generate_site
+
+    eval_run_id = uuid.uuid4()
+    model = getattr(driver, "model", "none")
+    if engine is not None:
+        with engine.begin() as conn:
+            conn.execute(
+                t.eval_run.insert().values(
+                    id=eval_run_id,
+                    suite="generation",
+                    driver=driver.name,
+                    model=model,
+                    prompt_version=f"generator.v{GEN_PROMPT}",
+                )
+            )
+    results = []
+    for case_dir in sorted(p for p in cases_dir.iterdir() if (p / "case.json").exists())[:limit]:
+        meta = json.loads((case_dir / "case.json").read_text())
+        res = generate_site(
+            f"gen-{meta['case']}",
+            PROJECT_ROOT / meta["pages"],
+            instruction=meta["instruction"],
+            driver=driver,
+            settings=settings,
+            engine=engine,
+            golden_for_grading=PROJECT_ROOT / meta["golden"],
+            sandbox_mode=sandbox_mode,
+            eval_run_id=eval_run_id,
+        )
+        res.case_id = meta["case"]
+        results.append(res)
+        if engine is not None:
+            with engine.begin() as conn:
+                conn.execute(
+                    t.eval_case_result.insert().values(
+                        eval_run_id=eval_run_id,
+                        case_id=res.case_id,
+                        passed=int(bool(res.golden_passed)),
+                        repair_needed=0,
+                        attempts=res.attempts,
+                        first_attempt_pass=int(res.first_attempt_pass),
+                        false_success=int(res.false_success),
+                        regression=0,
+                        field_accuracy_before=None,
+                        field_accuracy_after=res.field_accuracy,
+                        tool_calls=res.tool_calls,
+                        tool_errors=res.tool_errors,
+                        tokens=res.tokens,
+                        cost_usd=res.cost_usd,
+                        details=res.as_dict(),
+                    )
+                )
+    n = len(results)
+    ok = [r for r in results if r.golden_passed]
+    cost = round(sum(r.cost_usd for r in results), 4)
+    accs = [r.field_accuracy for r in results if r.field_accuracy is not None]
+    metrics = {
+        "cases": n,
+        "generation_success_rate": _rate(len(ok), n),
+        "first_attempt_pass_rate": _rate(
+            sum(r.first_attempt_pass and bool(r.golden_passed) for r in results), n
+        ),
+        "mean_field_accuracy": round(sum(accs) / len(accs), 3) if accs else 0.0,
+        "false_success_rate": _rate(sum(r.false_success for r in results), n),
+        "avg_attempts": round(sum(r.attempts for r in results) / n, 2) if n else 0.0,
+        "tool_call_failure_rate": _rate(
+            sum(r.tool_errors for r in results), sum(r.tool_calls for r in results)
+        ),
+        "tokens_total": sum(r.tokens for r in results),
+        "cost_usd_total": cost,
+        "cost_per_successful_generation": round(cost / len(ok), 4) if ok else None,
+    }
+    if engine is not None:
+        with engine.begin() as conn:
+            conn.execute(
+                update(t.eval_run)
+                .where(t.eval_run.c.id == eval_run_id)
+                .values(summary=metrics, finished_at=datetime.now(UTC))
+            )
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    (RESULTS_DIR / f"generation-{driver.name}-{datetime.now(UTC):%Y%m%dT%H%M%S}.json").write_text(
+        json.dumps(
+            {
+                "eval_run_id": str(eval_run_id),
+                "metrics": metrics,
+                "cases": [r.as_dict() for r in results],
+            },
+            indent=1,
+            default=str,
+        )
+    )
+    return {"metrics": metrics, "cases": [r.as_dict() for r in results]}

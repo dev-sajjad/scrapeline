@@ -96,7 +96,18 @@ class TesterReport:
             "records": self.records,
             "rejects": self.rejects,
             "pages_parsed": self.pages_parsed,
-            "golden": {k: g.get(k) for k in ("expected", "actual", "matched", "field_accuracy")}
+            "golden": {
+                k: g.get(k)
+                for k in (
+                    "mode",
+                    "checks",
+                    "expected",
+                    "actual",
+                    "matched",
+                    "field_accuracy",
+                    "sample_records",
+                )
+            }
             | {
                 "missing": (g.get("missing") or [])[:5],
                 "unexpected": (g.get("unexpected") or [])[:5],
@@ -212,12 +223,17 @@ def _run_sandbox(work: Path, settings: Settings, mode: SandboxMode) -> dict[str,
 def evaluate_spec(
     spec_yaml: str,
     pages_dir: Path,
-    golden_path: Path,
+    golden_path: Path | None,
     settings: Settings,
     *,
     mode: SandboxMode = "docker",
     base_url: str = "http://localhost:8080",
+    min_records: int = 1,
 ) -> TesterReport:
+    """Golden mode when `golden_path` is given; otherwise self-consistency mode for new sites
+    (records on every parsed page, all sample pages reached, no rejects/errors, unique ids,
+    canonical ids not synthesized for most rows). Self-consistency is weaker evidence than
+    golden rows; a human still checks sample rows in the PR."""
     started = time.monotonic()
     report = TesterReport(passed=False, stage="static", sandbox_mode=mode)
     report.security = _spec_security(spec_yaml)
@@ -246,9 +262,33 @@ def evaluate_spec(
             report.errors.append({"stage": "validate", "error": str(exc)[:300]})
     report.records = len(records)
     report.stage = "golden"
-    golden = compare(records, load_golden(golden_path, base_url))
-    report.golden = golden.as_dict()
-    report.passed = golden.passed and not report.errors and report.rejects == 0
+    if golden_path is not None:
+        golden = compare(records, load_golden(golden_path, base_url))
+        report.golden = golden.as_dict()
+        report.passed = golden.passed and not report.errors and report.rejects == 0
+    else:
+        ids = [r.external_id for r in records]
+        n_pages = len(list(pages_dir.glob("*.html")))
+        synthesized = sum(1 for i in ids if i.startswith("nk:"))
+        checks = {
+            "records_at_least_min": len(records) >= min_records,
+            "all_sample_pages_reached": report.pages_parsed == n_pages,
+            "unique_external_ids": len(ids) == len(set(ids)),
+            "few_synthesized_ids": synthesized <= len(ids) // 2,
+            "no_rejects": report.rejects == 0,
+            "no_errors": not report.errors,
+        }
+        sample = [r.model_dump(mode="json") | {"external_id": r.external_id} for r in records[:3]]
+        report.golden = {
+            "mode": "self_consistency",
+            "checks": checks,
+            "expected": None,
+            "actual": len(records),
+            "matched": None,
+            "field_accuracy": None,
+            "sample_records": sample,
+        }
+        report.passed = all(checks.values())
     report.stage = "done"
     report.duration_ms = int((time.monotonic() - started) * 1000)
     return report
