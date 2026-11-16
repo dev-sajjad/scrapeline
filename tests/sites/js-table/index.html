@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang='en'><head><meta charset='utf-8'><title>Meetings (JS)</title></head>
+<body>
+<header><h1>City of Fixtureville</h1><nav><a href='/static-list/'>Meetings</a></nav></header>
+<main>
+<h2>Meetings (interactive)</h2>
+<table id='meetings'><thead><tr><th>Meeting</th><th>Body</th><th>Date</th><th>Time</th><th>Location</th><th>Agenda</th></tr></thead><tbody></tbody></table>
+<button id='load-more' type='button'>Load more</button>
+<script id='meeting-data' type='application/json'>[{"id": "M-1001", "body": "City Council", "date": "2026-01-06", "time": "6:00 PM", "location": "Council Chamber, City Hall", "cancelled": false, "agenda": "/pdf-archive/files/agenda-1001.pdf"}, {"id": "M-1002", "body": "Planning Commission", "date": "01/15/2026", "time": "9:30 AM", "location": "Room 204, Civic Center", "cancelled": false, "agenda": null}, {"id": "M-1003", "body": "Parks Board", "date": "Sat, Jan 24th 2026", "time": "TBD", "location": "", "cancelled": false, "agenda": null}, {"id": "M-1004", "body": "Finance Committee", "date": "02 February 2026", "time": "2:00 PM", "location": "Public Library Annex", "cancelled": false, "agenda": null}, {"id": "M-1005", "body": "Zoning Board", "date": "Wednesday, February 11, 2026", "time": "6:00 PM", "location": "Council Chamber, City Hall", "cancelled": false, "agenda": null}, {"id": "M-1006", "body": "City Council", "date": "2026-02-20", "time": "9:30 AM", "location": "Room 204, Civic Center", "cancelled": false, "agenda": "/pdf-archive/files/agenda-1006.pdf"}, {"id": "M-1007", "body": "Planning Commission", "date": "03/01/2026", "time": "TBD", "location": "", "cancelled": false, "agenda": null}, {"id": "M-1008", "body": "Parks Board", "date": "Tue, Mar 10th 2026", "time": "2:00 PM", "location": "Public Library Annex", "cancelled": true, "agenda": null}, {"id": "M-1009", "body": "Finance Committee", "date": "19 March 2026", "time": "6:00 PM", "location": "Council Chamber, City Hall", "cancelled": false, "agenda": null}, {"id": "M-1010", "body": "Zoning Board", "date": "Saturday, March 28, 2026", "time": "9:30 AM", "location": "Room 204, Civic Center", "cancelled": false, "agenda": null}, {"id": "M-1011", "body": "City Council", "date": "2026-04-06", "time": "TBD", "location": "", "cancelled": false, "agenda": "/pdf-archive/files/agenda-1011.pdf"}, {"id": "M-1012", "body": "Planning Commission", "date": "04/15/2026", "time": "2:00 PM", "location": "Public Library Annex", "cancelled": false, "agenda": null}, {"id": "M-1013", "body": "Parks Board", "date": "Fri, Apr 24th 2026", "time": "6:00 PM", "location": "Council Chamber, City Hall", "cancelled": false, "agenda": null}, {"id": "M-1014", "body": "Finance Committee", "date": "03 May 2026", "time": "9:30 AM", "location": "Room 204, Civic Center", "cancelled": false, "agenda": null}, {"id": "M-1015", "body": "Zoning Board", "date": "Tuesday, May 12, 2026", "time": "TBD", "location": "", "cancelled": false, "agenda": null}, {"id": "M-1016", "body": "City Council", "date": "2026-05-21", "time": "2:00 PM", "location": "Public Library Annex", "cancelled": false, "agenda": "/pdf-archive/files/agenda-1016.pdf"}, {"id": "M-1017", "body": "Planning Commission", "date": "05/30/2026", "time": "6:00 PM", "location": "Council Chamber, City Hall", "cancelled": false, "agenda": null}, {"id": "M-1018", "body": "Parks Board", "date": "Mon, Jun 8th 2026", "time": "9:30 AM", "location": "Room 204, Civic Center", "cancelled": false, "agenda": null}, {"id": "M-1019", "body": "Finance Committee", "date": "17 June 2026", "time": "TBD", "location": "", "cancelled": false, "agenda": null}, {"id": "M-1020", "body": "Zoning Board", "date": "Friday, June 26, 2026", "time": "2:00 PM", "location": "Public Library Annex", "cancelled": true, "agenda": null}, {"id": "M-1021", "body": "City Council", "date": "2026-07-05", "time": "6:00 PM", "location": "Council Chamber, City Hall", "cancelled": false, "agenda": "/pdf-archive/files/agenda-1021.pdf"}, {"id": "M-1022", "body": "Planning Commission", "date": "07/14/2026", "time": "9:30 AM", "location": "Room 204, Civic Center", "cancelled": false, "agenda": null}, {"id": "M-1023", "body": "Parks Board", "date": "Thu, Jul 23rd 2026", "time": "TBD", "location": "", "cancelled": false, "agenda": null}, {"id": "M-1024", "body": "Finance Committee", "date": "01 August 2026", "time": "2:00 PM", "location": "Public Library Annex", "cancelled": false, "agenda": null}, {"id": "M-1025", "body": "Zoning Board", "date": "Monday, August 10, 2026", "time": "6:00 PM", "location": "Council Chamber, City Hall", "cancelled": false, "agenda": null}]</script>
+<script>
+(function () {
+  var data = JSON.parse(document.getElementById('meeting-data').textContent);
+  var shown = 0, PAGE = 10;
+  var tbody = document.querySelector('#meetings tbody');
+  var btn = document.getElementById('load-more');
+  function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+  function render() {
+    data.slice(shown, shown + PAGE).forEach(function (m) {
+      var tr = document.createElement('tr');
+      tr.className = 'meeting';
+      tr.setAttribute('data-meeting-id', m.id);
+      tr.innerHTML = '<td class="m-title">' + esc(m.body) + ' Meeting' +
+        (m.cancelled ? ' <em class="status">CANCELLED</em>' : '') + '</td>' +
+        '<td class="m-body">' + esc(m.body) + '</td>' +
+        '<td class="m-date">' + esc(m.date) + '</td><td class="m-time">' + esc(m.time) + '</td>' +
+        '<td class="m-loc">' + esc(m.location) + '</td>' +
+        '<td>' + (m.agenda ? '<a class="m-agenda" href="' + m.agenda + '">Agenda</a>' : '') + '</td>';
+      tbody.appendChild(tr);
+    });
+    shown += PAGE;
+    if (shown >= data.length) { btn.remove(); }
+  }
+  btn.addEventListener('click', function () { setTimeout(render, 150); });
+  setTimeout(render, 100);
+})();
+</script>
+</main>
+<footer>Fixture site for scrapeline tests.</footer>
+</body></html>

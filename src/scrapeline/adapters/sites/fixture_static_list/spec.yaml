@@ -1,0 +1,16 @@
+# Site adapter spec for the static-list fixture. Human-written reference spec.
+spec_version: 1
+schema: Meeting
+record: "table.meetings tbody tr"
+fields:
+  external_id:  {attr: data-id}
+  title:        {css: td.title, remove: [em.status]}
+  body_name:    {css: td.body, optional: true}
+  meeting_date: {css: td.date, transform: date}
+  start_time:   {css: td.time, transform: time, optional: true}
+  location:     {css: td.location, optional: true}
+  status:       {css: em.status, transform: status, optional: true, default: scheduled}
+  agenda_url:   {css: a.agenda, attr: href, transform: absolute_url, optional: true}
+next_page: {css: "a[rel=next]", attr: href}
+documents:
+  - {field: agenda_url, kind: agenda}

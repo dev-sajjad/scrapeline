@@ -200,6 +200,10 @@ class FetchClient:
             redirects=tuple(redirects),
         )
 
+    @property
+    def robots(self) -> RobotsCache | None:
+        return self._robots if self.respect_robots else None
+
     def close(self) -> None:
         self._http.close()
 

@@ -1,0 +1,52 @@
+{
+ "site": "pdf-archive",
+ "documents": [
+  {
+   "file": "agenda-1001.pdf",
+   "meeting_id": "M-1001",
+   "page_count": 1,
+   "needs_ocr": false,
+   "contains": [
+    "Public comment",
+    "Adjournment"
+   ]
+  },
+  {
+   "file": "agenda-1006.pdf",
+   "meeting_id": "M-1006",
+   "page_count": 1,
+   "needs_ocr": false,
+   "contains": [
+    "Public comment",
+    "Adjournment"
+   ]
+  },
+  {
+   "file": "agenda-1011.pdf",
+   "meeting_id": "M-1011",
+   "page_count": 1,
+   "needs_ocr": false,
+   "contains": [
+    "Public comment",
+    "Adjournment"
+   ]
+  },
+  {
+   "file": "agenda-1016.pdf",
+   "meeting_id": "M-1016",
+   "page_count": 1,
+   "needs_ocr": false,
+   "contains": [
+    "Public comment",
+    "Adjournment"
+   ]
+  },
+  {
+   "file": "agenda-1021.pdf",
+   "meeting_id": "M-1021",
+   "page_count": 1,
+   "needs_ocr": true,
+   "contains": []
+  }
+ ]
+}

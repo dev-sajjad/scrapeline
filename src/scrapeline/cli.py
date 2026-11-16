@@ -143,6 +143,50 @@ def reprocess(
 
 
 @app.command()
+def verify(source_id: str) -> None:
+    """Parse the latest run's raw docs offline and compare with golden rows (deterministic)."""
+    from scrapeline.adapters.base import load_adapter
+    from scrapeline.pipeline.models import SCHEMAS
+    from scrapeline.quality.golden import compare, load_golden
+    from scrapeline.settings import PROJECT_ROOT, get_settings
+
+    runner = _runner()
+    cfg = runner.source(source_id)
+    golden_name = cfg.options.get("golden") or cfg.id.removeprefix("fixture-")
+    golden_path = PROJECT_ROOT / "tests" / "fixtures" / "golden" / f"{golden_name}.json"
+    if not golden_path.exists():
+        raise typer.BadParameter(f"no golden file {golden_path}")
+    adapter = load_adapter(cfg)
+    model = SCHEMAS[cfg.schema_]
+    records = [
+        rec
+        for raw in runner.latest_raw_docs(source_id)
+        for rec in adapter.parse(raw).records
+        if type(rec) is model
+    ]
+    report = compare(records, load_golden(golden_path, get_settings().fixture_base_url))
+    _echo(report.as_dict())
+    if not report.passed:
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def documents(
+    source_id: str, limit: int = typer.Option(20, help="Max documents per call.")
+) -> None:
+    """Download linked documents (PDF) through FetchClient and extract text (+OCR flag)."""
+    from scrapeline.pipeline.documents import download_documents
+
+    runner = _runner()
+    cfg = runner.source(source_id)
+    with runner._client(cfg, []) as client:
+        stats = download_documents(
+            runner.engine, client, runner.raw_store, source_id=cfg.id, limit=limit
+        )
+    _echo({"source_id": cfg.id, **stats})
+
+
+@app.command()
 def status(source_id: str = typer.Argument(None)) -> None:
     """Latest runs, checks and open incidents."""
     from sqlalchemy import select

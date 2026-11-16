@@ -14,6 +14,8 @@ legal:
     Official public read-only Legistar Web API (no key required for this tenant).
     robots.txt on webapi.legistar.com returns 404 (no rules). Meeting metadata only;
     body contact fields are never read.
+    Agenda/minutes PDFs on legistar*.granicus.com are disallowed by robots.txt
+    (checked 2026-11-17), so documents are link-only for this platform.
 schema: Meeting
 watermark: { field: source_modified_at, initial_lookback_days: 365, overlap_hours: 24 }
 adapter: scrapeline.adapters.platforms.legistar:LegistarAdapter

@@ -40,7 +40,7 @@ class Jurisdiction(_Strict):
     id: str = Field(pattern=r"^[a-z]{2}(-[a-z0-9]+)+$")
     name: str
     state: str | None = None
-    country: str = "US"
+    country: str = Field(default="US", pattern=r"^[A-Z]{2}$")
 
 
 class Politeness(_Strict):

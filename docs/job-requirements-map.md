@@ -17,7 +17,7 @@ Source posting: Turl Street Group, "Junior Data Engineer (Scraping & AI Agents)"
 | Posting line | Proof | Phase | Status |
 |---|---|---|---|
 | Strong Python, working SQL | typed `src/` package, mypy strict; Alembic migrations, SKIP LOCKED queue, dbt | 2–4 | ☑ typed package, mypy strict; Alembic migrations, upserts, advisory locks |
-| Web scraping incl. dynamic pages, pagination, anti-bot issues | js-table fixture + Playwright; five pagination strategies; `quality/antibot.py` detects 403/429/challenges and escalates, never evades | 1, 2 | ☐ |
+| Web scraping incl. dynamic pages, pagination, anti-bot issues | js-table fixture + Playwright; five pagination strategies; `quality/antibot.py` detects 403/429/challenges and escalates, never evades | 1, 2 | ☑ Playwright BrowserPool (js-table, Load more), next-link/offset pagination, 403/429/challenge/empty-shell detection → incidents, robots.txt respected |
 | Daily practical use of AI coding agents; give context, break tasks down, catch mistakes | this CLAUDE.md, `docs/ai-workflow.md`, checklist-driven tasks, review log of caught mistakes | 0 | ☐ |
 | Read unfamiliar code fast, judge critically, never merge what you don't understand | AI-review checklist, rejected agent PRs with reasons | 6 | ☐ |
 | ETL concepts and basic data modelling | identity/content-hash model, schema_version, dims and facts | 3, 4 | ☑ identity + content-hash change detection, lineage columns, schema_version |
@@ -31,4 +31,4 @@ Source posting: Turl Street Group, "Junior Data Engineer (Scraping & AI Agents)"
 | Evals or test harnesses for LLM output | `evals/` benchmarks and metrics; golden-based grading | 6 | ☐ |
 | PostgreSQL, Docker | Postgres 16 schema; Compose dev/prod/agents profiles; sandbox (ADR-0004) | 0–6 | ☑ Postgres 16 + Alembic; Playwright-based app image; offline sandbox with isolation check |
 | Kafka, Kubernetes | Out of scope by ADR-0003; reason documented | n/a | n/a |
-| PDF and document extraction, OCR | `pipeline/documents.py`, pymupdf, OCR flag, 40-doc golden set | 5 | ☐ |
+| PDF and document extraction, OCR | `pipeline/documents.py`, pymupdf, OCR flag, 40-doc golden set | 5 | ☑ PyMuPDF text, image-only PDF → needs_ocr, Tesseract OCR in docker image; LLM extraction in step 4+ |

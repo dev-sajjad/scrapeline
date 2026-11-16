@@ -27,7 +27,8 @@ from scrapeline.errors import (
     RobotsDisallowedError,
     ScrapelineError,
 )
-from scrapeline.fetch.client import CircuitBreaker, FetchClient, FetchEvent
+from scrapeline.fetch.browser import BrowserPool
+from scrapeline.fetch.client import CircuitBreaker, FetchClient, FetchEvent, FetchResponse
 from scrapeline.fetch.limiter import HostRateLimiter
 from scrapeline.fetch.urlpolicy import Resolver, URLPolicy, system_resolver
 from scrapeline.ops import runs
@@ -99,6 +100,7 @@ class Runner:
         self.resolver = resolver
         self.sleep = sleep
         self._sources = sources
+        self._browser: BrowserPool | None = None
 
     # -- public -----------------------------------------------------------------------------
 
@@ -125,6 +127,9 @@ class Runner:
             try:
                 return self._run_locked(cfg, adapter, kind, since, until, force)
             finally:
+                if self._browser is not None:
+                    self._browser.close()
+                    self._browser = None
                 runs.release_source_lock(lock_conn, cfg.id)
                 lock_conn.commit()
 
@@ -185,6 +190,43 @@ class Runner:
             return self._finish(
                 cfg, summary, collected, version_id, zero_is_ok=False, advance_watermark=False
             )
+
+    def latest_raw_docs(self, source_id: str) -> list[RawDoc]:
+        """Raw documents of the latest succeeded run (offline input for verify/tester)."""
+        cfg = self.source(source_id)
+        with self.engine.connect() as conn:
+            run_id = conn.execute(
+                select(t.run.c.id)
+                .where(
+                    t.run.c.source_id == cfg.id,
+                    t.run.c.status == "succeeded",
+                    t.run.c.kind != "reprocess",
+                )
+                .order_by(t.run.c.started_at.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            if run_id is None:
+                raise ConfigError(f"no succeeded run for {cfg.id}; run it first")
+            rows = conn.execute(
+                select(t.fetch_log)
+                .where(t.fetch_log.c.run_id == run_id, t.fetch_log.c.raw_key.is_not(None))
+                .order_by(t.fetch_log.c.id)
+            ).fetchall()
+        return [
+            RawDoc(
+                source_id=cfg.id,
+                url=r.url,
+                final_url=r.final_url or r.url,
+                status=r.status,
+                content_type=r.content_type,
+                content=self.raw_store.get(r.raw_key),
+                sha256=r.raw_sha256,
+                fetched_at=r.fetched_at,
+                kind=r.kind or "page",
+                meta=r.meta or {},
+            )
+            for r in rows
+        ]
 
     # -- internals --------------------------------------------------------------------------
 
@@ -286,7 +328,10 @@ class Runner:
             if target.url in seen:
                 continue
             seen.add(target.url)
-            response = adapter.fetch(target, client)
+            if target.render:
+                response = self._render(cfg, adapter, client, target, events)
+            else:
+                response = adapter.fetch(target, client)
             summary.pages += 1
             ref = self.raw_store.put(
                 cfg.id,
@@ -311,6 +356,45 @@ class Runner:
             result = adapter.parse(raw)
             collected.absorb(result, Provenance(ref.sha256, response.fetched_at))
             queue.extend(result.next_targets)
+
+    def _render(
+        self,
+        cfg: SourceConfig,
+        adapter: Adapter,
+        client: FetchClient,
+        target: Target,
+        events: list[FetchEvent],
+    ) -> FetchResponse:
+        """Render through the shared-policy BrowserPool; the DOM snapshot becomes the raw doc."""
+        if self._browser is None:
+            self._browser = BrowserPool(
+                policy=client.policy,
+                limiter=client.limiter,
+                user_agent=client.user_agent,
+                robots=client.robots,
+                on_event=events.append,
+                screenshot_dir=self.settings.raw_store_dir.parent / "screenshots",
+            )
+        opts = getattr(adapter, "render_options", None)
+        response = self._browser.render(
+            target.url,
+            wait_for=getattr(opts, "wait_for", None),
+            click_until_gone=getattr(opts, "click_until_gone", None),
+            max_clicks=getattr(opts, "max_clicks", 10),
+        )
+        # Synthetic final event = the rendered snapshot; it carries the raw provenance.
+        events.append(
+            FetchEvent(
+                target.url,
+                response.status,
+                response.elapsed_ms,
+                len(response.content),
+                1,
+                response.fetched_at,
+                None,
+            )
+        )
+        return response
 
     def _drain_events(
         self,

@@ -6,7 +6,7 @@
 FROM python:3.12.8-slim
 
 RUN pip install --no-cache-dir \
-      "pydantic>=2.10,<3" "selectolax>=0.3" "beautifulsoup4>=4.13" \
+      "pydantic>=2.10,<3" "selectolax>=1.0" "beautifulsoup4>=4.13" \
       "python-dateutil>=2.9" "pyyaml>=6.0"
 
 # Only pure modules (no fetch/, no store/, no settings). Harness grows in step 4.
