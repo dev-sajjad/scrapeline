@@ -42,7 +42,8 @@ fmt:
 type:
 	uv run mypy src
 
-check: lint type test
+check:         ## lint + types + unit tests (pipefail-safe gate)
+	bash scripts/check.sh
 
 migrate:
 	uv run alembic upgrade head

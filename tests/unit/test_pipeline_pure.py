@@ -47,7 +47,7 @@ def test_parse_time(raw: str | None, expected: time | None) -> None:
 
 
 def test_clean_text_and_urls() -> None:
-    assert clean_text("  Council\r\n Chamber  ") == "Council Chamber"
+    assert clean_text("  Council\r\n Chamber\u00a0 ") == "Council Chamber"
     assert clean_text("   ") is None
     assert absolute_url("/a/b.pdf", "https://x.gov/m/") == "https://x.gov/a/b.pdf"
     assert absolute_url("javascript:void(0)", "https://x.gov/") is None
@@ -123,7 +123,8 @@ def test_ext_for() -> None:
         ),
         (
             200,
-            b"<html><body><h1>Meetings</h1><table><tr><td>City Council regular meeting</td></tr></table></body></html>",
+            b"<html><body><h1>Meetings</h1><table><tr><td>City Council regular meeting"
+            b"</td></tr></table></body></html>",
             "text/html",
             None,
         ),
