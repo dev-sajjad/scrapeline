@@ -1,0 +1,24 @@
+id: legistar-denver
+name: Denver — meetings (Legistar Web API)
+platform: legistar
+tenant: denver
+kind: api
+entry: https://webapi.legistar.com/v1/denver
+jurisdiction: { id: us-co-denver, name: Denver, state: CO }
+allowed_hosts: [webapi.legistar.com, legistar2.granicus.com, legistar1.granicus.com, denver.legistar.com]
+cadence: daily
+politeness: { rps: 1, concurrency: 1, respect_robots: true }
+legal:
+  terms_checked: 2026-11-17
+  notes: >-
+    Official public read-only Legistar Web API (no key required for this tenant).
+    robots.txt on webapi.legistar.com returns 404 (no rules). Meeting metadata only;
+    body contact fields are never read.
+schema: Meeting
+watermark: { field: source_modified_at, initial_lookback_days: 365, overlap_hours: 24 }
+adapter: scrapeline.adapters.platforms.legistar:LegistarAdapter
+pagination: offset
+max_pages_per_run: 50
+status: draft
+config_version: 1
+quality: { min_records: 1, max_records: 20000, max_reject_rate: 0.05 }

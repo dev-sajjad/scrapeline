@@ -1,8 +1,27 @@
-"""SQLAlchemy Core table definitions. Every table here has an Alembic migration (CLAUDE.md §4.2)."""
+"""SQLAlchemy Core tables. Each block names the migration that creates it (CLAUDE.md §4.2).
+
+`tests/integration/test_migrations.py` fails if these definitions and the migrations diverge.
+"""
 
 from __future__ import annotations
 
-from sqlalchemy import MetaData
+from sqlalchemy import (
+    BigInteger,
+    Column,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    Text,
+    Time,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 metadata = MetaData(
     naming_convention={
@@ -12,4 +31,251 @@ metadata = MetaData(
         "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
         "pk": "pk_%(table_name)s",
     }
+)
+
+
+def _ts(name: str, *, nullable: bool = False, default: bool = False) -> Column[object]:
+    return Column(
+        name,
+        DateTime(timezone=True),
+        nullable=nullable,
+        server_default=func.now() if default else None,
+    )
+
+
+# --- 0001: registry, runs, jobs, fetch log ----------------------------------------------------
+
+sources = Table(
+    "sources",
+    metadata,
+    Column("id", String(100), primary_key=True),
+    Column("name", Text, nullable=False),
+    Column("platform", String(50), nullable=False),
+    Column("tenant", String(100)),
+    Column("jurisdiction_id", String(100)),
+    Column("status", String(20), nullable=False),
+    Column("status_note", Text),
+    Column("config_version", Integer, nullable=False),
+    Column("config", JSONB, nullable=False),
+    Column("watermark", DateTime(timezone=True)),
+    _ts("created_at", default=True),
+    _ts("updated_at", default=True),
+)
+
+scraper_versions = Table(
+    "scraper_versions",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("source_id", String(100), ForeignKey("sources.id"), nullable=False),
+    Column("adapter", Text, nullable=False),
+    Column("code_hash", String(64), nullable=False),
+    Column("author", String(100), nullable=False, server_default="human"),
+    _ts("created_at", default=True),
+    UniqueConstraint("source_id", "code_hash", name="uq_scraper_versions_source_code"),
+)
+
+run = Table(
+    "run",
+    metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column("source_id", String(100), ForeignKey("sources.id"), nullable=False),
+    Column("kind", String(20), nullable=False),  # incremental | backfill | reprocess
+    Column("status", String(20), nullable=False),  # running | succeeded | failed
+    Column("scraper_version_id", Integer, ForeignKey("scraper_versions.id")),
+    Column("since", DateTime(timezone=True)),
+    Column("until", DateTime(timezone=True)),
+    Column("stats", JSONB, nullable=False, server_default="{}"),
+    Column("error", Text),
+    _ts("started_at", default=True),
+    _ts("finished_at", nullable=True),
+    schema="ops",
+)
+
+job = Table(
+    "job",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("kind", String(50), nullable=False),
+    Column("source_id", String(100), ForeignKey("sources.id")),
+    Column("payload", JSONB, nullable=False, server_default="{}"),
+    Column("status", String(20), nullable=False, server_default="queued"),
+    Column("attempts", Integer, nullable=False, server_default="0"),
+    Column("max_attempts", Integer, nullable=False, server_default="3"),
+    _ts("run_after", default=True),
+    _ts("lease_until", nullable=True),
+    Column("worker_id", String(100)),
+    Column("last_error", Text),
+    _ts("created_at", default=True),
+    _ts("updated_at", default=True),
+    schema="ops",
+)
+
+fetch_log = Table(
+    "fetch_log",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("run_id", UUID(as_uuid=True), ForeignKey("ops.run.id")),
+    Column("source_id", String(100), nullable=False),
+    Column("url", Text, nullable=False),
+    Column("final_url", Text),
+    Column("status", Integer),
+    Column("attempt", Integer, nullable=False, server_default="1"),
+    Column("elapsed_ms", Integer),
+    Column("nbytes", Integer),
+    Column("content_type", Text),
+    Column("kind", String(50)),
+    Column("raw_sha256", String(64)),
+    Column("raw_key", Text),
+    Column("meta", JSONB, nullable=False, server_default="{}"),
+    Column("error", Text),
+    _ts("fetched_at"),
+    schema="raw",
+)
+
+# --- 0002: normalised civic data ---------------------------------------------------------------
+
+
+def _lineage() -> list[Column[object]]:
+    """Provenance and identity columns on every normalised row (CLAUDE.md §0.8)."""
+    return [
+        Column("source_id", String(100), ForeignKey("sources.id"), nullable=False),
+        Column("external_id", Text, nullable=False),
+        Column("canonical_url", Text),
+        Column("content_hash", String(64), nullable=False),
+        Column("schema_version", Integer, nullable=False),
+        _ts("first_seen_at"),
+        _ts("last_seen_at"),
+        _ts("fetched_at"),
+        Column("run_id", UUID(as_uuid=True), ForeignKey("ops.run.id"), nullable=False),
+        Column("scraper_version_id", Integer, ForeignKey("scraper_versions.id")),
+        Column("raw_sha256", String(64)),
+    ]
+
+
+jurisdictions = Table(
+    "jurisdictions",
+    metadata,
+    Column("id", String(100), primary_key=True),
+    Column("name", Text, nullable=False),
+    Column("state", String(10)),
+    Column("country", String(2), nullable=False, server_default="US"),
+    _ts("created_at", default=True),
+)
+
+bodies = Table(
+    "bodies",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("jurisdiction_id", String(100), ForeignKey("jurisdictions.id"), nullable=False),
+    Column("name", Text, nullable=False),
+    Column("body_type", Text),
+    Column("active", Integer),
+    *_lineage(),
+    UniqueConstraint("source_id", "external_id", name="uq_bodies_source_external"),
+)
+
+meetings = Table(
+    "meetings",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("jurisdiction_id", String(100), ForeignKey("jurisdictions.id"), nullable=False),
+    Column("body_external_id", Text),
+    Column("body_name", Text),
+    Column("title", Text, nullable=False),
+    Column("meeting_date", Date, nullable=False),
+    Column("start_time", Time),
+    Column("location", Text),
+    Column("status", String(20), nullable=False),
+    Column("agenda_url", Text),
+    Column("minutes_url", Text),
+    Column("source_modified_at", DateTime(timezone=True)),
+    *_lineage(),
+    UniqueConstraint("source_id", "external_id", name="uq_meetings_source_external"),
+)
+
+agenda_items = Table(
+    "agenda_items",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("meeting_external_id", Text, nullable=False),
+    Column("sequence", Integer),
+    Column("item_number", Text),
+    Column("title", Text, nullable=False),
+    Column("action", Text),
+    Column("matter_type", Text),
+    *_lineage(),
+    UniqueConstraint("source_id", "external_id", name="uq_agenda_items_source_external"),
+)
+
+documents = Table(
+    "documents",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("meeting_external_id", Text),
+    Column("kind", String(30), nullable=False),  # agenda | minutes | packet | other
+    Column("title", Text),
+    Column("url", Text, nullable=False),
+    Column("doc_sha256", String(64)),
+    Column("page_count", Integer),
+    Column("text_chars", Integer),
+    Column("needs_ocr", Integer),
+    Column("text", Text),
+    *_lineage(),
+    UniqueConstraint("source_id", "external_id", name="uq_documents_source_external"),
+)
+
+rejects = Table(
+    "rejects",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("run_id", UUID(as_uuid=True), ForeignKey("ops.run.id"), nullable=False),
+    Column("source_id", String(100), nullable=False),
+    Column("record_type", String(50), nullable=False),
+    Column("raw_sha256", String(64)),
+    Column("record", JSONB, nullable=False),
+    Column("reason", Text, nullable=False),
+    _ts("created_at", default=True),
+    schema="pipeline",
+)
+
+# --- 0003: quality and incidents ---------------------------------------------------------------
+
+check_result = Table(
+    "check_result",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("run_id", UUID(as_uuid=True), ForeignKey("ops.run.id"), nullable=False),
+    Column("source_id", String(100), nullable=False),
+    Column("check_name", String(100), nullable=False),
+    Column("status", String(10), nullable=False),  # pass | warn | fail
+    Column("value", Float),
+    Column("threshold", Text),
+    Column("details", JSONB, nullable=False, server_default="{}"),
+    _ts("created_at", default=True),
+    schema="ops",
+)
+
+incident = Table(
+    "incident",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("source_id", String(100), ForeignKey("sources.id"), nullable=False),
+    Column("run_id", UUID(as_uuid=True), ForeignKey("ops.run.id")),
+    Column("kind", String(50), nullable=False),  # drift | blocked | quality | repair_exhausted
+    Column("status", String(10), nullable=False, server_default="open"),  # open | ack | closed
+    Column("summary", Text, nullable=False),
+    Column("details", JSONB, nullable=False, server_default="{}"),
+    _ts("opened_at", default=True),
+    _ts("closed_at", nullable=True),
+    schema="ops",
+)
+
+metric_daily = Table(
+    "metric_daily",
+    metadata,
+    Column("day", Date, primary_key=True),
+    Column("source_id", String(100), primary_key=True),
+    Column("metric", String(100), primary_key=True),
+    Column("value", Float, nullable=False),
+    schema="ops",
 )
