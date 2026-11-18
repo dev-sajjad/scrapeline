@@ -25,6 +25,9 @@ jobs:
       - run: uv sync --frozen --extra serve
       - run: uv run playwright install --with-deps chromium
       - run: docker compose up -d --wait
+      # test_agents_db runs the tester through `docker run scrapeline-sandbox:latest`;
+      # images are per-job, so the integration job builds its own.
+      - run: docker build -f docker/sandbox/Dockerfile -t scrapeline-sandbox:latest .
       - run: uv run alembic upgrade head
       - run: uv run pytest -m "integration or browser"
       - if: always()
