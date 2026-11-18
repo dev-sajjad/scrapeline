@@ -1,6 +1,6 @@
-"""SQLAlchemy Core tables. Each block names the migration that creates it (CLAUDE.md §4.2).
+"""SQLAlchemy Core tables, grouped by the migration that creates them.
 
-`tests/integration/test_migrations.py` fails if these definitions and the migrations diverge.
+`alembic check` (run in the integration tests) fails if these and the migrations diverge.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ def _ts(name: str, *, nullable: bool = False, default: bool = False) -> Column[o
     )
 
 
-# --- 0001: registry, runs, jobs, fetch log ----------------------------------------------------
+# Migration 0001: registry, runs, jobs, fetch log
 
 sources = Table(
     "sources",
@@ -132,11 +132,11 @@ fetch_log = Table(
     schema="raw",
 )
 
-# --- 0002: normalised civic data ---------------------------------------------------------------
+# Migration 0002: normalised civic data
 
 
 def _lineage() -> list[Column[object]]:
-    """Provenance and identity columns on every normalised row (CLAUDE.md §0.8)."""
+    """Provenance and identity columns on every normalised row."""
     return [
         Column("source_id", String(100), ForeignKey("sources.id"), nullable=False),
         Column("external_id", Text, nullable=False),
@@ -238,7 +238,7 @@ rejects = Table(
     schema="pipeline",
 )
 
-# --- 0003: quality and incidents ---------------------------------------------------------------
+# Migration 0003: quality and incidents
 
 check_result = Table(
     "check_result",
@@ -280,7 +280,7 @@ metric_daily = Table(
     schema="ops",
 )
 
-# --- 0004: agents and evals --------------------------------------------------------------------
+# Migration 0004: agents and evals
 
 agent_run = Table(
     "agent_run",

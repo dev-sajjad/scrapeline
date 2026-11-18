@@ -1,4 +1,4 @@
-"""Record schemas. Every record carries `schema_version` (CLAUDE.md §4.1).
+"""Record schemas. Every record carries `schema_version`.
 
 Parsers build these; validation failures become rows in `pipeline.rejects`, never silent drops.
 Lineage columns (run_id, raw_sha256, ...) are added by the pipeline, not by parsers.

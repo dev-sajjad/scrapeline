@@ -2,7 +2,7 @@
 # Base tag MUST match the `playwright==` pin in pyproject.toml (browsers + system deps preinstalled).
 FROM mcr.microsoft.com/playwright/python:v1.65.2-noble
 
-# Tesseract for OCR fallback on scanned PDFs (slice B / phase 5).
+# Tesseract for OCR fallback on scanned PDFs.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng \
  && rm -rf /var/lib/apt/lists/*

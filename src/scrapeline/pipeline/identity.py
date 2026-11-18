@@ -1,4 +1,4 @@
-"""Identity and change detection (CLAUDE.md §4.1).
+"""Identity and change detection.
 
 Identity = (source_id, external_id). When a source has no stable id, parsers call
 `meeting_natural_key` (jurisdiction + canonical URL, else body + date + folded title).

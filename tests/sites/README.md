@@ -9,4 +9,4 @@ Served by nginx at http://localhost:8080 (`make up`). Deterministic, generated b
 | js-table/ | rows rendered by JS from inline JSON, "Load more" button (Playwright) | `fixture_js_table/spec.yaml` |
 | pdf-archive/ | document index + 5 agenda PDFs; one is image-only (scanned) -> `needs_ocr` | `pipeline/documents.py` |
 | blocked/ | `forbidden` (403), `ratelimited` (429), `challenge.html`, `empty-shell.html` | detection tests only |
-| drift/<case>/ | single-mutation copies for repair evals (step 4) | |
+| drift/<case>/ | single-mutation copies for repair evals | |

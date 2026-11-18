@@ -1,7 +1,7 @@
 """Thin wrapper over the Anthropic SDK (ADR-0002). SDK calls stay visible; this adds:
 model ids from settings, prompt files, usage + cost accounting, budget stop, ops.agent_run logging.
 
-The deterministic platform never imports this module (CLAUDE.md §0.1).
+The deterministic platform never imports this module.
 """
 
 from __future__ import annotations
@@ -178,7 +178,7 @@ class AnthropicDriver:
 
 @dataclass
 class AgentRunLog:
-    """Writes ops.agent_run + ops.agent_tool_call (CLAUDE.md §0.9). No-op without an engine."""
+    """Writes ops.agent_run + ops.agent_tool_call. No-op without an engine."""
 
     engine: Engine | None
     role: str

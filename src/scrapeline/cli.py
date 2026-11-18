@@ -78,9 +78,6 @@ def version() -> None:
     typer.echo(__version__)
 
 
-# -- sources ---------------------------------------------------------------------------------
-
-
 @source_app.command("list")
 def source_list() -> None:
     """List sources from config/sources/*.yaml (status from DB when available)."""
@@ -123,9 +120,6 @@ def source_set_status(
     with get_engine().begin() as conn:
         set_status(conn, source_id, status, note)
     _echo({"source_id": source_id, "status": status})
-
-
-# -- runs ------------------------------------------------------------------------------------
 
 
 @app.command()
@@ -368,7 +362,7 @@ def eval_run(
     local_sandbox: bool = typer.Option(False, help="Run the tester in-process (no docker)."),
     no_db: bool = typer.Option(False, help="Do not write evals.* / ops.agent_run rows."),
 ) -> None:
-    """Run the repair benchmark (tests/sites/drift) and print §5.4 metrics."""
+    """Run the repair benchmark (tests/sites/drift) and print eval metrics."""
     from scrapeline.evals.runner import run_repair_suite
     from scrapeline.settings import get_settings
     from scrapeline.store.db import get_engine

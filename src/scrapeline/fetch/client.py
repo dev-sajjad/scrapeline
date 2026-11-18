@@ -1,4 +1,4 @@
-"""FetchClient: the only httpx path to the network (CLAUDE.md §0.2).
+"""FetchClient: the only httpx path to the network.
 
 Per request: URL policy → robots.txt → circuit breaker → rate limiter → GET (no auto-redirect)
 → each redirect target re-checked → retries with backoff on 429/5xx/timeouts (Retry-After honoured)
@@ -148,8 +148,6 @@ class FetchClient:
         )
         self._robots = RobotsCache(self._fetch_robots, self.user_agent)
 
-    # -- public ----------------------------------------------------------------
-
     def get(
         self,
         url: str,
@@ -212,8 +210,6 @@ class FetchClient:
 
     def __exit__(self, *exc: object) -> None:
         self.close()
-
-    # -- internals -------------------------------------------------------------
 
     def _check_robots(self, url: str) -> None:
         if self.respect_robots and not self._robots.allowed(url):

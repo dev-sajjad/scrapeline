@@ -1,4 +1,4 @@
-"""Generator agent for long-tail sites (CLAUDE.md §5.2, §5.5). Selectors first.
+"""Generator agent for long-tail sites. Selectors first.
 
 instruction + captured sample pages -> spec.yaml in a scoped workspace -> deterministic tester
 (self-consistency; golden rows when they exist) -> agent/* branch with spec + draft source YAML.

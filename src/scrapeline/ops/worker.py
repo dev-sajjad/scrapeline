@@ -1,4 +1,4 @@
-"""Trusted worker loop + scheduler (cron fallback until Airflow; CLAUDE.md §7 cut list)."""
+"""Trusted worker loop and cron-driven scheduler."""
 
 from __future__ import annotations
 

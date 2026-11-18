@@ -1,4 +1,4 @@
-"""BrowserPool: the only Playwright path to the network (CLAUDE.md §0.2, §1.1).
+"""BrowserPool: the only Playwright path to the network.
 
 Same URL policy, robots check and per-host rate limiter as FetchClient. `page.route` aborts
 off-allowlist requests and heavy resources (images, fonts, media) and logs every response.

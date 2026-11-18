@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     scrapeline_env: Literal["dev", "test", "prod"] = "dev"
     database_url: str = "postgresql+psycopg://scrapeline:scrapeline@localhost:5432/scrapeline"
 
-    # Raw store. Filesystem backend first; S3 backend is a later slice.
+    # Raw store
     raw_store_dir: Path = PROJECT_ROOT / "data" / "raw"
     sources_dir: Path = PROJECT_ROOT / "config" / "sources"
 
@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     circuit_failure_threshold: int = 5
     circuit_reset_s: float = 300.0
 
-    # LLM (agents only; foundation never depends on these).
+    # LLM (agents only; scraping never depends on it)
     anthropic_api_key: SecretStr | None = None
     model_generate: str = "claude-opus-5-5"
     model_repair: str = "claude-opus-5-5"

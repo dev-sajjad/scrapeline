@@ -1,4 +1,4 @@
-"""Anti-bot response *detection*. Never evasion (CLAUDE.md §0.3).
+"""Anti-bot response *detection*. Never evasion.
 
 A detected block stops the run for that host, backs off and opens an incident. The fix is
 an official API, a slower schedule, or retiring the source, never a disguise.

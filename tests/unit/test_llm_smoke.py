@@ -1,7 +1,7 @@
 """Smoke test for the beta SDK surface we depend on (tool_runner, @beta_tool, usage fields).
 
 Opt-in: `uv run pytest -m llm tests/unit/test_llm_smoke.py` (costs a fraction of a cent).
-Run after every SDK upgrade (CLAUDE.md §3).
+Run after every SDK upgrade.
 """
 
 from __future__ import annotations

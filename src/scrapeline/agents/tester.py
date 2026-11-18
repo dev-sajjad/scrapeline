@@ -1,4 +1,4 @@
-"""Deterministic tester (no LLM). The only judge of agent output (CLAUDE.md §0.11, §5.2).
+"""Deterministic tester (no LLM). The only judge of agent output.
 
 Stages: (1) static: spec schema validation / AST security check for python;
 (2) sandbox: parse sample pages offline (`docker run --network none ...`);

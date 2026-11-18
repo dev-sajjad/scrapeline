@@ -1,4 +1,4 @@
-"""URL policy (SSRF guard) applied to every outbound URL. CLAUDE.md §1.2.
+"""URL policy (SSRF guard) applied to every outbound URL.
 
 Rules: http/https only; no userinfo; host on the source allowlist (exact or subdomain);
 DNS-resolved addresses must all be globally routable (rejects loopback, private, link-local

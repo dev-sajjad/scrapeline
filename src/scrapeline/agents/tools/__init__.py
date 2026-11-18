@@ -1,4 +1,4 @@
-"""Narrow, typed agent tools (CLAUDE.md §5.2). No shell, no generic file read, no network, no .env.
+"""Narrow, typed agent tools. No shell, no generic file read, no network, no .env.
 
 Every tool is bound to ONE source and ONE workspace directory; it cannot name other paths.
 Page content is returned wrapped in <untrusted_page_content> and is data, never instructions.

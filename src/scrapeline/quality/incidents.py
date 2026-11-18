@@ -51,7 +51,7 @@ def open_incident(
         )
         .returning(incident.c.id)
     ).scalar_one()
-    # Alert = structured log event (webhook optional, later). Runbook: docs/runbook/<kind>.md
+    # Alerts are structured log events; runbook: docs/runbook/<kind>.md
     log.error(
         "incident.opened", incident_id=new_id, source_id=source_id, kind=kind, summary=summary
     )

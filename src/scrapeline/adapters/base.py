@@ -1,4 +1,4 @@
-"""Adapter contract (CLAUDE.md §1.1). Adapters interpret pages; the runtime does all I/O."""
+"""Adapter contract. Adapters interpret pages; the runtime does all I/O."""
 
 from __future__ import annotations
 

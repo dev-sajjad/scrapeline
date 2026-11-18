@@ -1,6 +1,6 @@
 """Per-run data quality checks (pandas) -> ops.check_result.
 
-A 200 with zero rows is a quality failure, not success (CLAUDE.md §6) - except an incremental
+A 200 with zero rows is a quality failure, not success - except an incremental
 run whose watermark window legitimately contains no changes, which is a `warn`.
 """
 
@@ -55,7 +55,7 @@ def run_checks(
     n_rejects = sum(1 for r in rejects if r.record_type == primary_type)
     results: list[CheckResult] = []
 
-    # 1. record count range
+    # Record count range
     if n < cfg.min_records:
         status: CheckStatus = "warn" if zero_is_ok and n == 0 else "fail"
     elif n > cfg.max_records:
@@ -72,7 +72,7 @@ def run_checks(
         )
     )
 
-    # 2. required/optional field null rates
+    # Null rates per field
     for column, max_rate in sorted(cfg.max_null_rate.items()):
         if column not in df.columns:
             continue
@@ -83,7 +83,7 @@ def run_checks(
             status = "fail" if max_rate < 0.1 else "warn"
         results.append(CheckResult(f"null_rate.{column}", status, rate, f"<= {max_rate}"))
 
-    # 3. duplicate identities inside one raw document (parser emitted the same record twice)
+    # Duplicate identities inside one raw document (parser emitted the same record twice)
     dup_rate = duplicates_within_raw / (n + duplicates_within_raw) if n else 0.0
     results.append(
         CheckResult(
@@ -95,7 +95,7 @@ def run_checks(
         )
     )
 
-    # 4. reject rate
+    # Reject rate
     total = n + n_rejects
     reject_rate = n_rejects / total if total else 0.0
     sample = [r.reason for r in rejects[:5]]

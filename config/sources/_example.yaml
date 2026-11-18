@@ -2,7 +2,7 @@
 # Platform source (one adapter, many cities): only platform + tenant + jurisdiction change.
 id: legistar-example
 name: Example City — meetings (Legistar Web API)
-platform: legistar            # legistar | civicplus | custom | fixture
+platform: legistar            # legistar | custom | fixture
 tenant: example               # platform client id
 kind: api                     # api | html | js | pdf_index
 entry: https://webapi.legistar.com/v1/example

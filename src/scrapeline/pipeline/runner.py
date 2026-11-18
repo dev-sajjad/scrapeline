@@ -102,8 +102,6 @@ class Runner:
         self._sources = sources
         self._browser: BrowserPool | None = None
 
-    # -- public -----------------------------------------------------------------------------
-
     def source(self, source_id: str) -> SourceConfig:
         sources = self._sources or load_sources(self.settings.sources_dir)
         if source_id not in sources:
@@ -227,8 +225,6 @@ class Runner:
             )
             for r in rows
         ]
-
-    # -- internals --------------------------------------------------------------------------
 
     def _prepare(self, conn: Any, cfg: SourceConfig, *, force: bool) -> None:
         status = runs.sync_source(conn, cfg)
