@@ -13,6 +13,16 @@ import structlog
 _configured = False
 
 
+class _CurrentStderr:
+    """Resolve sys.stderr at write time (CLI runners and tests swap and close streams)."""
+
+    def write(self, text: str) -> int:
+        return sys.stderr.write(text)
+
+    def flush(self) -> None:
+        sys.stderr.flush()
+
+
 def configure_logging(level: str = "INFO", *, json: bool = True) -> None:
     global _configured
     logging.basicConfig(format="%(message)s", stream=sys.stderr, level=level)
@@ -27,7 +37,7 @@ def configure_logging(level: str = "INFO", *, json: bool = True) -> None:
             renderer,
         ],
         wrapper_class=structlog.make_filtering_bound_logger(logging.getLevelName(level)),
-        logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
+        logger_factory=structlog.PrintLoggerFactory(file=_CurrentStderr()),  # type: ignore[arg-type]
         cache_logger_on_first_use=True,
     )
     _configured = True

@@ -546,7 +546,7 @@ class Runner:
         kind = (
             "blocked"
             if isinstance(exc, BlockedError | RobotsDisallowedError | CircuitOpenError)
-            else "parse_error"
+            else "drift"
             if isinstance(exc, ParseError)
             else "fetch_error"
             if isinstance(exc, FetchError)

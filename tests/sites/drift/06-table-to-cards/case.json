@@ -1,0 +1,8 @@
+{
+ "case": "06-table-to-cards",
+ "base_site": "static-list",
+ "source_id": "fixture-static-list",
+ "description": "table layout replaced with article cards",
+ "breaks_reference_spec": true,
+ "golden": "static-list"
+}

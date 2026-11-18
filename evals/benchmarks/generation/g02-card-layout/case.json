@@ -1,0 +1,7 @@
+{
+ "case": "g02-card-layout",
+ "pages": "tests/sites/drift/06-table-to-cards",
+ "golden": "tests/fixtures/golden/static-list.json",
+ "description": "Article cards instead of a table",
+ "instruction": "Collect all public meetings with title, body name, date, start time, location, status (scheduled/cancelled) and agenda PDF link."
+}

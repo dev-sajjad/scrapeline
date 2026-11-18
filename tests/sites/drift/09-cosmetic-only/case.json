@@ -1,0 +1,8 @@
+{
+ "case": "09-cosmetic-only",
+ "base_site": "static-list",
+ "source_id": "fixture-static-list",
+ "description": "wrapper div + inline styles added; selectors still valid (no repair needed)",
+ "breaks_reference_spec": false,
+ "golden": "static-list"
+}

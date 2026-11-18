@@ -1,0 +1,8 @@
+{
+ "case": "08-id-attribute-renamed",
+ "base_site": "static-list",
+ "source_id": "fixture-static-list",
+ "description": "data-id renamed to data-meeting-key",
+ "breaks_reference_spec": true,
+ "golden": "static-list"
+}

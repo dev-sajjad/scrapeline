@@ -16,7 +16,31 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 source_app = typer.Typer(help="Inspect and manage registered sources.", no_args_is_help=True)
+agent_app = typer.Typer(
+    help="AI agents (repair). Agents open branches; humans merge.", no_args_is_help=True
+)
+eval_app = typer.Typer(help="Agent evals over benchmark cases.", no_args_is_help=True)
+drift_app = typer.Typer(help="Drift diagnosis (deterministic).", no_args_is_help=True)
 app.add_typer(source_app, name="source")
+app.add_typer(agent_app, name="agent")
+app.add_typer(eval_app, name="eval")
+app.add_typer(drift_app, name="drift")
+
+
+def _driver(name: str) -> Any:
+    from scrapeline.agents.llm import AnthropicDriver, NoopDriver
+    from scrapeline.settings import get_settings
+
+    settings = get_settings()
+    if name == "noop":
+        return NoopDriver()
+    if name != "anthropic":
+        raise typer.BadParameter("driver must be 'anthropic' or 'noop'")
+    if settings.anthropic_api_key is None:
+        raise typer.BadParameter(
+            "ANTHROPIC_API_KEY is not set (.env); use --driver noop for a baseline"
+        )
+    return AnthropicDriver(settings, settings.model_repair, max_usd=settings.agent_max_usd_per_run)
 
 
 def _echo(data: Any) -> None:
@@ -184,6 +208,194 @@ def documents(
             runner.engine, client, runner.raw_store, source_id=cfg.id, limit=limit
         )
     _echo({"source_id": cfg.id, **stats})
+
+
+@drift_app.command("diagnose")
+def drift_diagnose(
+    source_id: str, case: str = typer.Option(..., help="Directory of new pages.")
+) -> None:
+    """Which selectors of the source's spec stop matching on the given pages."""
+    from pathlib import Path
+
+    from scrapeline.adapters.declarative import SiteSpec, spec_path_for
+    from scrapeline.quality.drift import diagnose
+
+    spec = SiteSpec.from_yaml(spec_path_for(source_id).read_text())
+    _echo(diagnose(spec, (Path(case) / "index.html").read_text()))
+
+
+@agent_app.command("repair")
+def agent_repair(
+    source_id: str,
+    case: str = typer.Option(..., help="Directory with the captured (drifted) pages."),
+    driver: str = typer.Option("anthropic", help="anthropic | noop"),
+    apply: bool = typer.Option(False, help="Commit the repaired spec on a new agent/* branch."),
+    local_sandbox: bool = typer.Option(False, help="Run the tester in-process (no docker)."),
+) -> None:
+    """Repair a broken declarative adapter (max 3 attempts, then source -> broken)."""
+    from pathlib import Path
+
+    from scrapeline.agents.repairer import repair_case
+    from scrapeline.settings import get_settings
+    from scrapeline.store.db import get_engine
+
+    result = repair_case(
+        source_id,
+        Path(case),
+        driver=_driver(driver),
+        settings=get_settings(),
+        engine=get_engine(),
+        apply=apply,
+        sandbox_mode="local" if local_sandbox else "docker",
+    )
+    _echo(result.as_dict())
+    if not result.passed:
+        raise typer.Exit(code=1)
+
+
+@agent_app.command("generate")
+def agent_generate(
+    source_id: str,
+    pages: str = typer.Option(..., help="Directory of captured sample pages (scrapeline capture)."),
+    instruction: str = typer.Option(..., help="What to collect."),
+    driver: str = typer.Option("anthropic", help="anthropic | noop"),
+    apply: bool = typer.Option(False, help="Commit spec + draft source YAML on an agent/* branch."),
+    entry: str = typer.Option(None, help="Entry URL for the draft source YAML (with --apply)."),
+    local_sandbox: bool = typer.Option(False, help="Run the tester in-process (no docker)."),
+) -> None:
+    """Generate a declarative site adapter for a new (long-tail) source from sample pages."""
+    from pathlib import Path
+
+    from scrapeline.agents.generator import generate_site
+    from scrapeline.settings import get_settings
+    from scrapeline.store.db import get_engine
+
+    source_yaml = None
+    if apply:
+        if not entry:
+            raise typer.BadParameter("--apply needs --entry")
+        source_yaml = _draft_source_yaml(source_id, entry, instruction)
+    result = generate_site(
+        source_id,
+        Path(pages),
+        instruction=instruction,
+        driver=_driver(driver),
+        settings=get_settings(),
+        engine=get_engine(),
+        apply=apply,
+        source_yaml=source_yaml,
+        sandbox_mode="local" if local_sandbox else "docker",
+    )
+    _echo(result.as_dict())
+    if not result.passed:
+        raise typer.Exit(code=1)
+
+
+def _draft_source_yaml(source_id: str, entry: str, instruction: str) -> str:
+    """Draft source config for human completion. safe_dump: instruction text is untrusted."""
+    from urllib.parse import urlsplit
+
+    import yaml
+
+    doc = {
+        "id": source_id,
+        "name": f"{source_id} (agent-generated, draft)",
+        "platform": "custom",
+        "kind": "html",
+        "entry": entry,
+        "jurisdiction": {"id": "xx-unknown", "name": "TODO-human", "country": "US"},
+        "allowed_hosts": [urlsplit(entry).hostname or ""],
+        "cadence": "daily",
+        "politeness": {"rps": 1, "concurrency": 1, "respect_robots": True},
+        "legal": {
+            "terms_checked": "1970-01-01",
+            "notes": "TODO(human): review terms + robots.txt before activating.",
+        },
+        "schema": "Meeting",
+        "adapter": "scrapeline.adapters.declarative:DeclarativeAdapter",
+        "status": "draft",
+        "owner": "agent",
+        "config_version": 1,
+        "instruction": {"collect": instruction, "schema": "Meeting"},
+    }
+    return yaml.safe_dump(doc, sort_keys=False, allow_unicode=True)
+
+
+@app.command()
+def capture(
+    source_id: str,
+    url: list[str] = typer.Option(None, help="Extra URLs (pages 2..n) to capture."),
+    render: bool = typer.Option(False, help="Render with Playwright (JS sites)."),
+) -> None:
+    """Trusted worker step: capture sample pages for an agent into data/samples/<source>/.
+
+    Uses the source's politeness policy (URL policy, robots, rate limit). Agents never fetch.
+    """
+    from pathlib import Path
+
+    from scrapeline.fetch.browser import BrowserPool
+
+    runner = _runner()
+    cfg = runner.source(source_id)
+    out_dir = Path("data/samples") / source_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    urls = [cfg.entry, *(url or [])]
+    saved = []
+    with runner._client(cfg, []) as client:
+        pool = (
+            BrowserPool(client.policy, client.limiter, client.user_agent, robots=client.robots)
+            if render
+            else None
+        )
+        try:
+            for i, u in enumerate(urls):
+                resp = pool.render(u) if pool else client.get(u)
+                runner.raw_store.put(cfg.id, resp.content, "html", resp.fetched_at)
+                name = "index.html" if i == 0 else Path(u.split("?")[0]).name or f"page{i + 1}.html"
+                (out_dir / name).write_bytes(resp.content)
+                saved.append(str(out_dir / name))
+        finally:
+            if pool:
+                pool.close()
+    _echo({"source_id": cfg.id, "saved": saved})
+
+
+@eval_app.command("run")
+def eval_run(
+    suite: str = typer.Option("repair", help="repair | generation"),
+    driver: str = typer.Option("anthropic", help="anthropic | noop (baseline, no LLM)"),
+    limit: int = typer.Option(None, help="Run only the first N cases."),
+    local_sandbox: bool = typer.Option(False, help="Run the tester in-process (no docker)."),
+    no_db: bool = typer.Option(False, help="Do not write evals.* / ops.agent_run rows."),
+) -> None:
+    """Run the repair benchmark (tests/sites/drift) and print §5.4 metrics."""
+    from scrapeline.evals.runner import run_repair_suite
+    from scrapeline.settings import get_settings
+    from scrapeline.store.db import get_engine
+
+    if suite == "generation":
+        from scrapeline.evals.runner import run_generation_suite
+
+        _echo(
+            run_generation_suite(
+                driver=_driver(driver),
+                settings=get_settings(),
+                engine=None if no_db else get_engine(),
+                limit=limit,
+                sandbox_mode="local" if local_sandbox else "docker",
+            )["metrics"]
+        )
+        return
+    if suite != "repair":
+        raise typer.BadParameter("--suite must be repair or generation")
+    result = run_repair_suite(
+        driver=_driver(driver),
+        settings=get_settings(),
+        engine=None if no_db else get_engine(),
+        limit=limit,
+        sandbox_mode="local" if local_sandbox else "docker",
+    )
+    typer.echo(result.markdown())
 
 
 @app.command()

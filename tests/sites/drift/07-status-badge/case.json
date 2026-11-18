@@ -1,0 +1,8 @@
+{
+ "case": "07-status-badge",
+ "base_site": "static-list",
+ "source_id": "fixture-static-list",
+ "description": "em.status replaced by span.badge.badge-cancelled",
+ "breaks_reference_spec": true,
+ "golden": "static-list"
+}

@@ -1,0 +1,8 @@
+{
+ "case": "10-location-column-moved",
+ "base_site": "static-list",
+ "source_id": "fixture-static-list",
+ "description": "location column moved before date and renamed td.venue",
+ "breaks_reference_spec": true,
+ "golden": "static-list"
+}
