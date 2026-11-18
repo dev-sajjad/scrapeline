@@ -4,7 +4,7 @@ Production-grade scraper platform. A human or an agent registers a **source** (a
 
 **Scale model (how real civic-data teams cover 10,000+ jurisdictions):** most US cities publish meetings through a few vendor platforms (Legistar/Granicus, CivicPlus AgendaCenter, PrimeGov, eScribe, BoardDocs, iQM2). scrapeline writes **one platform adapter per vendor**; a jurisdiction is then just a YAML file with `platform` + `tenant`. Custom one-off sites (the long tail) get a **site adapter**, which is where the generator agent works. Drift on a platform adapter is high-impact (many cities break at once); drift on a site adapter is local.
 
-Portfolio target: Turl Street Group "Junior Data Engineer (Scraping & AI Agents)". Coverage map: `docs/job-requirements-map.md`. Every phase below must move a row in that map from ☐ to ☑. **Real public sources beat fixtures as proof**: fixtures are for tests and evals; the demo and README show real rows from real cities.
+**Universal by design:** any public website, API or document index, in any country and language. Nothing is hard-coded to one country; locale, timezone and date order are per-source config. Legistar (US) is one example platform adapter, not the focus. **Real public sources beat fixtures as proof**: fixtures are for tests and evals; the demo and README show real rows from real sources.
 
 Owner: Sajjad Hussain. Claude Code assists; the owner reviews and merges everything. Phase numbers in §7 are the single source of truth; every other reference uses them.
 
@@ -21,7 +21,7 @@ Owner: Sajjad Hussain. Claude Code assists; the owner reviews and merges everyth
 7. **Raw is immutable.** Every fetched response is stored once under its SHA-256 before parsing. Anything downstream can be rebuilt from raw.
 8. **Provenance and identity on every row** (§4.1): `source_id`, `external_id`, `canonical_url`, `content_hash`, `schema_version`, `first_seen_at`, `last_seen_at`, `fetched_at`, `run_id`, `scraper_version_id`, `raw_sha256`.
 9. **Every LLM call is logged** to `ops.agent_run` with model, prompt version, tools called, input/output tokens, cost (USD), iterations, outcome, source and run ids.
-10. **Untrusted input everywhere.** URLs from config, pages and documents go through `fetch/urlpolicy.py` (§1.2). Page content is data, never instructions (§5.3). Secrets only in `.env` (gitignored); the crawler contact is the public resume email; no account email anywhere.
+10. **Untrusted input everywhere.** URLs from config, pages and documents go through `fetch/urlpolicy.py` (§1.2). Page content is data, never instructions (§5.3). Secrets only in `.env` (gitignored); the crawler contact is a public project contact address; no account email anywhere.
 11. **An LLM saying "looks correct" is never evidence.** Release requires deterministic tests, quality checks, sandbox checks and human approval (§5.2).
 
 ---
@@ -117,7 +117,7 @@ evals/benchmarks/    generation/ repair/ extraction/ cases; evals/results/ outpu
 dbt/                 phase 4, marts over normalised tables
 airflow/dags/        phase 7
 docker/              app (one image: dev shell, CI, worker; Playwright base), sandbox (offline parser runner), nginx
-docs/                adr/, runbook/, job-requirements-map.md, ai-review-log.md, evals.md, ai-workflow.md, architecture.md
+docs/                adr/, runbook/, ai-review-log.md, evals.md, ai-workflow.md, architecture.md
 ```
 
 ---
@@ -126,7 +126,7 @@ docs/                adr/, runbook/, job-requirements-map.md, ai-review-log.md, 
 
 | Concern | Choice | Notes |
 |---|---|---|
-| Container runtime | Kiri (owner's choice) or any Docker Engine API runtime (Docker Desktop, OrbStack, Colima) | Only standard `docker`/`docker compose` used. `make sandbox-check` proves isolation on the active runtime. |
+| Container runtime | Docker Desktop now; Kiri later (optional). Any Docker Engine API runtime works | Only standard `docker`/`docker compose` used. `make sandbox-check` proves isolation on the active runtime. |
 | Image | `mcr.microsoft.com/playwright/python:v<X>-noble`, tag = `playwright==` pin | browsers + deps preinstalled; Tesseract added |
 | Python | 3.12, `uv python install 3.12` | Not the system 3.15; Playwright and Airflow lag. CI runs 3.12. |
 | Packaging | uv + `uv.lock` committed, hatchling, `src/` layout | Explicit version floors in `pyproject.toml`; lockfile is the reproducible truth. |
@@ -208,7 +208,7 @@ Generation success rate · first-attempt deterministic pass rate · extraction f
 ### 5.5 Source instruction format (universal; human or agent)
 
 ```yaml
-platform: legistar              # legistar | civicplus | ... | custom  (custom = site adapter)
+platform: legistar              # legistar | ... | custom  (custom = site adapter)
 tenant: seattle                 # platform client id; omitted for custom
 instruction:
   collect: "All city council meetings with date, title, location, agenda PDF link"
@@ -244,11 +244,12 @@ Generator flow: instruction → worker captures 3 sample pages to raw → cheap-
 
 ## 6. Conventions and compliance
 
+- Code is human-readable with a clean, conventional structure. Comments are short and explain *why*, only where the code cannot; no section banners, no references to planning docs, no plan notes ("later", "phase N") in code. Docstrings: concise, PEP 257.
 - Type everything; `mypy --strict` passes. `ruff` clean. No `print`; structlog JSON with `run_id`, `source_id`, `job_id`.
 - Errors: typed exceptions in `scrapeline/errors.py`; never return `[]` to mean failure. A 200 with zero rows is a quality failure, not success.
 - Tests: unit tests mock network with `respx`; integration tests hit fixture sites only; `llm` tests opt-in (`pytest -m llm`); every adapter has fixture-based tests.
 - Commits: Conventional Commits, small, one concern. Branch per checklist item. PR template filled; AI-review checklist for any adapter change. `docs/ai-review-log.md` records every agent PR decision.
-- Claude Code workflow (`docs/ai-workflow.md`): this file is the context; tasks are broken into checklist items; every AI-written diff is read in full before commit; mistakes caught are logged in the review log. This is the posting's "daily, practical use of AI coding agents" made visible.
+- Claude Code workflow (`docs/ai-workflow.md`): this file is the context; tasks are broken into checklist items; every AI-written diff is read in full before commit; mistakes caught are logged in the review log.
 - Compliance: review terms, access restrictions and robots.txt before activating a source (`legal:` block in YAML); prefer official APIs; retire blocked sources; collect only fields the instruction needs; exclude attendee lists, personal contact details, signatures and unrelated personal data in v1; public availability does not justify retention.
 - Laptop limits (18 GB): Playwright pool ≤2, worker concurrency ≤2, Airflow LocalExecutor only.
 
@@ -266,30 +267,30 @@ Generator flow: instruction → worker captures 3 sample pages to raw → cheap-
 | 5 | PDF and document extraction |
 | 6 | AI agents and evaluation |
 | 7 | Airflow, orchestration, deployment |
-| 8 | API, dashboard, MCP, portfolio release |
+| 8 | API, dashboard, MCP, release |
 
 A phase is complete only when its code and tests exist and CI is green.
 
 ### 7.0 Build order: steps (how phases are actually worked)
 
-**Status 2026-11-17:** steps 1–5 built on branches `feat/step-1-base` … `feat/step-6-ship` (stacked). Open items: paid eval run (`make eval`, needs key) to fill `docs/evals.md`; ≥2 accepted + ≥2 rejected agent PRs in the review log; CivicPlus adapter; `test_llm_smoke.py`; Airflow/dbt (cut list; cron + worker is the fallback); S3 raw backend; reviewing generated tests.
+**Status 2026-11-18:** steps 1–6 merged to `main`. Workflow: commit to `development`, owner merges `development` → `main`. Next: per-source locale/timezone (dates are parsed US-order today); `import-linter` layer contracts + split `runner.py` + `fetch/pagination.py`; generic `Record` schema; 2–3 real non-US sources (one via generator); paid eval run to fill `docs/evals.md`; ≥2 accepted + ≥2 rejected agent PRs in the review log. CivicPlus dropped. Later: Kiri, S3 raw backend, Airflow/dbt (cut list; cron + worker is the fallback).
 
 Phases group capabilities; **steps set the order**. Each step ships a working end-to-end demo on its own branch with CI green before the next starts. Build the thinnest version of each phase item the step needs; finish the rest later. Do not start step 4 (agents) before steps 2 and 3 work. Repair agent comes before generator: it is easier to measure and maps to "find the cause of broken or drifting scrapers".
 
 | Step | Goal (demoable result) | Phase items pulled in |
 |---|---|---|
-| **1 — Docker base** | `make up` (postgres + fixtures) on Kiri; app image on Playwright base; settings, logging, CLI, pre-commit, CI | 0 (all) |
+| **1 — Docker base** | `make up` (postgres + fixtures); app image on Playwright base; settings, logging, CLI, pre-commit, CI | 0 (all) |
 | **2 — Real data end to end** | `scrapeline run legistar-<city>` for 3 real cities → raw store → `meetings` + `bodies` in Postgres; run twice = same counts; README shows real rows | 2: `urlpolicy` (no pinning), `limiter`, `robots`, `client.py`, `store/raw.py`, `adapters/base.py`, registry, Legistar platform adapter, migration 0001; 3: models, identity, load, watermark, rejects, migration 0002; 4: count-range, null-rate, duplicate checks (pandas) → `ops.check_result` |
 | **3 — HTML, browser, documents, anti-bot** | CivicPlus AgendaCenter platform adapter (HTML + pagination + agenda PDFs) on real cities; Playwright on `js-table`; 403/429 detected not evaded | 1: static-list, js-table, pdf-archive, blocked fixtures + golden; 2: `browser.py`, `pagination.py`, `antibot.py`, `ops/queue.py` + worker; 5: PDF text + page count (OCR flag); `tests/snapshots/` of real pages |
 | **4 — Drift, repair agent, evals** (headline) | Mutated snapshot breaks an adapter → drift incident → repairer opens PR → tester passes/fails it deterministically → eval table in `docs/evals.md` | 4: `drift.py`, incidents, migration 0003, runbook; 1: drift cases (real snapshot mutations first); 6: `llm.py`, tools, tester, offline sandbox, `declarative.py` + site specs, repairer, migration 0004, evals, review log (≥2 rejected, ≥2 accepted) |
 | **5 — Generator for long tail** | Register a custom city site by instruction only → generator PR → human review → live `draft` run | 6: generator + prompt + generation evals |
-| **6 — Ship** | `make demo` in under 5 minutes; README proof table; job map all ☑ | 4: dbt marts; 7: Airflow DAGs (or documented cron fallback); 8: FastAPI; S3 raw backend; cut list applies to the rest |
+| **6 — Ship** | `make demo` in under 5 minutes; README proof table | 4: dbt marts; 7: Airflow DAGs (or documented cron fallback); 8: FastAPI; S3 raw backend; cut list applies to the rest |
 
 Real-source rules: register only official/public endpoints; fill the `legal:` block first; test reachability from the operator's location early (US geo-blocks happen; fallback is the US CI runner, never a proxy).
 
 ### Phase 0 — Skeleton
 - [ ] `git init`, first commit; GitHub repo `scrapeline`, `main` protected (PR only).
-- [ ] `make setup` succeeds (`uv.lock` committed); `make up` brings postgres + fixtures healthy on Kiri; `make image` builds the Playwright-based app image; `make sandbox-check` passes.
+- [ ] `make setup` succeeds (`uv.lock` committed); `make up` brings postgres + fixtures healthy; `make image` builds the Playwright-based app image; `make sandbox-check` passes.
 - [x] `settings.py`, `ops/logging.py`, `cli.py` with `scrapeline --help`.
 - [x] Pre-commit: ruff, mypy. CI green on an empty test. `docs/ai-workflow.md` written.
 
@@ -312,7 +313,7 @@ Real-source rules: register only official/public endpoints; fill the `legal:` bl
 - [x] `store/raw.py`; `ops/queue.py` (SKIP LOCKED, lease, heartbeat, dead-letter); `scrapeline worker`.
 - [x] `adapters/base.py` + `registry/` with status machine.
 - [x] Platform adapter: Legistar Web API (step 2) — Seattle, Oakland, Denver; snapshot tests. (sfgov retired: tenant returns 400.)
-- [ ] Platform adapter: CivicPlus AgendaCenter. Finding 2026-11-17: rows load via `POST /AgendaCenter/UpdateCategoryList {year, catID}` per category; needs `FetchClient.post` (same policy) or BrowserPool expanding categories. `/RSS.aspx` is robots-disallowed on sampled sites.
+- [~] Dropped 2026-11-18 (adds no capability beyond Legistar): platform adapter CivicPlus AgendaCenter. Finding 2026-11-17: rows load via `POST /AgendaCenter/UpdateCategoryList {year, catID}` per category; needs `FetchClient.post` (same policy) or BrowserPool expanding categories. `/RSS.aspx` is robots-disallowed on sampled sites.
 - [ ] Hand-written site adapters for the 4 base fixture sites; integration tests green.
 - [x] ADR-0005: URL policy v1 scope (IP pinning deferred, reasons, residual risk).
 - [x] Migration 0001.
@@ -354,7 +355,6 @@ Real-source rules: register only official/public endpoints; fill the `legal:` bl
 - [ ] Streamlit over ops tables: scraper health, incidents, agent metrics, cost.
 - [ ] MCP server: `search_meetings`, `source_status`.
 - [x] `scripts/demo.sh` end to end; README with diagram, metrics table, ADR index, production-grade proof table.
-- [ ] `docs/job-requirements-map.md` all ☑; resume and portfolio updated.
 
 Cut order if time runs out: MCP → Streamlit → Airflow (keep a documented cron fallback) → dbt. Never cut steps 1–4 (phases 0–4 and 6).
 
@@ -371,9 +371,8 @@ Cut order if time runs out: MCP → Streamlit → Airflow (keep a documented cro
 8. Every agent operation is logged with prompt/model version, usage, cost, outcome.
 9. No agent merges or writes to `main`.
 10. Generated code is not "done" until tested and documented.
-11. `docs/job-requirements-map.md` is updated when a capability lands.
-12. Deterministic scraping, ETL, checks and ops work with the AI service unavailable.
-13. No secrets in the repo; no new network path outside `fetch/`.
+11. Deterministic scraping, ETL, checks and ops work with the AI service unavailable.
+12. No secrets in the repo; no new network path outside `fetch/`.
 
 ## 9. Commands
 `make setup` · `make up` · `make image` · `make shell` · `make sandbox-check` · `make test` · `make test-int` · `make lint` · `make type` · `make migrate` · `make eval` · `make demo` · `scrapeline --help`
