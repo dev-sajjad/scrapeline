@@ -1,0 +1,19 @@
+# JS-rendered table: rows only exist after scripts run and "Load more" is clicked.
+spec_version: 1
+schema: Meeting
+record: "#meetings tbody tr.meeting"
+fields:
+  external_id:  {attr: data-meeting-id}
+  title:        {css: td.m-title, remove: [em.status]}
+  body_name:    {css: td.m-body, optional: true}
+  meeting_date: {css: td.m-date, transform: date}
+  start_time:   {css: td.m-time, transform: time, optional: true}
+  location:     {css: td.m-loc, optional: true}
+  status:       {css: em.status, transform: status, optional: true, default: scheduled}
+  agenda_url:   {css: a.m-agenda, attr: href, transform: absolute_url, optional: true}
+documents:
+  - {field: agenda_url, kind: agenda}
+render:
+  wait_for: "#meetings tbody tr.meeting"
+  click_until_gone: "#load-more"
+  max_clicks: 10

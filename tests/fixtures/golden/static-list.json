@@ -1,0 +1,256 @@
+{
+ "site": "static-list",
+ "schema": "Meeting",
+ "records": [
+  {
+   "external_id": "M-1001",
+   "title": "City Council Meeting",
+   "body_name": "City Council",
+   "meeting_date": "2026-01-06",
+   "start_time": "18:00:00",
+   "location": "Council Chamber, City Hall",
+   "status": "scheduled",
+   "agenda_url": "{FIXTURE_BASE_URL}/pdf-archive/files/agenda-1001.pdf"
+  },
+  {
+   "external_id": "M-1002",
+   "title": "Planning Commission Meeting",
+   "body_name": "Planning Commission",
+   "meeting_date": "2026-01-15",
+   "start_time": "09:30:00",
+   "location": "Room 204, Civic Center",
+   "status": "scheduled",
+   "agenda_url": null
+  },
+  {
+   "external_id": "M-1003",
+   "title": "Parks Board Meeting",
+   "body_name": "Parks Board",
+   "meeting_date": "2026-01-24",
+   "start_time": null,
+   "location": null,
+   "status": "scheduled",
+   "agenda_url": null
+  },
+  {
+   "external_id": "M-1004",
+   "title": "Finance Committee Meeting",
+   "body_name": "Finance Committee",
+   "meeting_date": "2026-02-02",
+   "start_time": "14:00:00",
+   "location": "Public Library Annex",
+   "status": "scheduled",
+   "agenda_url": null
+  },
+  {
+   "external_id": "M-1005",
+   "title": "Zoning Board Meeting",
+   "body_name": "Zoning Board",
+   "meeting_date": "2026-02-11",
+   "start_time": "18:00:00",
+   "location": "Council Chamber, City Hall",
+   "status": "scheduled",
+   "agenda_url": null
+  },
+  {
+   "external_id": "M-1006",
+   "title": "City Council Meeting",
+   "body_name": "City Council",
+   "meeting_date": "2026-02-20",
+   "start_time": "09:30:00",
+   "location": "Room 204, Civic Center",
+   "status": "scheduled",
+   "agenda_url": "{FIXTURE_BASE_URL}/pdf-archive/files/agenda-1006.pdf"
+  },
+  {
+   "external_id": "M-1007",
+   "title": "Planning Commission Meeting",
+   "body_name": "Planning Commission",
+   "meeting_date": "2026-03-01",
+   "start_time": null,
+   "location": null,
+   "status": "scheduled",
+   "agenda_url": null
+  },
+  {
+   "external_id": "M-1008",
+   "title": "Parks Board Meeting",
+   "body_name": "Parks Board",
+   "meeting_date": "2026-03-10",
+   "start_time": "14:00:00",
+   "location": "Public Library Annex",
+   "status": "cancelled",
+   "agenda_url": null
+  },
+  {
+   "external_id": "M-1009",
+   "title": "Finance Committee Meeting",
+   "body_name": "Finance Committee",
+   "meeting_date": "2026-03-19",
+   "start_time": "18:00:00",
+   "location": "Council Chamber, City Hall",
+   "status": "scheduled",
+   "agenda_url": null
+  },
+  {
+   "external_id": "M-1010",
+   "title": "Zoning Board Meeting",
+   "body_name": "Zoning Board",
+   "meeting_date": "2026-03-28",
+   "start_time": "09:30:00",
+   "location": "Room 204, Civic Center",
+   "status": "scheduled",
+   "agenda_url": null
+  },
+  {
+   "external_id": "M-1011",
+   "title": "City Council Meeting",
+   "body_name": "City Council",
+   "meeting_date": "2026-04-06",
+   "start_time": null,
+   "location": null,
+   "status": "scheduled",
+   "agenda_url": "{FIXTURE_BASE_URL}/pdf-archive/files/agenda-1011.pdf"
+  },
+  {
+   "external_id": "M-1012",
+   "title": "Planning Commission Meeting",
+   "body_name": "Planning Commission",
+   "meeting_date": "2026-04-15",
+   "start_time": "14:00:00",
+   "location": "Public Library Annex",
+   "status": "scheduled",
+   "agenda_url": null
+  },
+  {
+   "external_id": "M-1013",
+   "title": "Parks Board Meeting",
+   "body_name": "Parks Board",
+   "meeting_date": "2026-04-24",
+   "start_time": "18:00:00",
+   "location": "Council Chamber, City Hall",
+   "status": "scheduled",
+   "agenda_url": null
+  },
+  {
+   "external_id": "M-1014",
+   "title": "Finance Committee Meeting",
+   "body_name": "Finance Committee",
+   "meeting_date": "2026-05-03",
+   "start_time": "09:30:00",
+   "location": "Room 204, Civic Center",
+   "status": "scheduled",
+   "agenda_url": null
+  },
+  {
+   "external_id": "M-1015",
+   "title": "Zoning Board Meeting",
+   "body_name": "Zoning Board",
+   "meeting_date": "2026-05-12",
+   "start_time": null,
+   "location": null,
+   "status": "scheduled",
+   "agenda_url": null
+  },
+  {
+   "external_id": "M-1016",
+   "title": "City Council Meeting",
+   "body_name": "City Council",
+   "meeting_date": "2026-05-21",
+   "start_time": "14:00:00",
+   "location": "Public Library Annex",
+   "status": "scheduled",
+   "agenda_url": "{FIXTURE_BASE_URL}/pdf-archive/files/agenda-1016.pdf"
+  },
+  {
+   "external_id": "M-1017",
+   "title": "Planning Commission Meeting",
+   "body_name": "Planning Commission",
+   "meeting_date": "2026-05-30",
+   "start_time": "18:00:00",
+   "location": "Council Chamber, City Hall",
+   "status": "scheduled",
+   "agenda_url": null
+  },
+  {
+   "external_id": "M-1018",
+   "title": "Parks Board Meeting",
+   "body_name": "Parks Board",
+   "meeting_date": "2026-06-08",
+   "start_time": "09:30:00",
+   "location": "Room 204, Civic Center",
+   "status": "scheduled",
+   "agenda_url": null
+  },
+  {
+   "external_id": "M-1019",
+   "title": "Finance Committee Meeting",
+   "body_name": "Finance Committee",
+   "meeting_date": "2026-06-17",
+   "start_time": null,
+   "location": null,
+   "status": "scheduled",
+   "agenda_url": null
+  },
+  {
+   "external_id": "M-1020",
+   "title": "Zoning Board Meeting",
+   "body_name": "Zoning Board",
+   "meeting_date": "2026-06-26",
+   "start_time": "14:00:00",
+   "location": "Public Library Annex",
+   "status": "cancelled",
+   "agenda_url": null
+  },
+  {
+   "external_id": "M-1021",
+   "title": "City Council Meeting",
+   "body_name": "City Council",
+   "meeting_date": "2026-07-05",
+   "start_time": "18:00:00",
+   "location": "Council Chamber, City Hall",
+   "status": "scheduled",
+   "agenda_url": "{FIXTURE_BASE_URL}/pdf-archive/files/agenda-1021.pdf"
+  },
+  {
+   "external_id": "M-1022",
+   "title": "Planning Commission Meeting",
+   "body_name": "Planning Commission",
+   "meeting_date": "2026-07-14",
+   "start_time": "09:30:00",
+   "location": "Room 204, Civic Center",
+   "status": "scheduled",
+   "agenda_url": null
+  },
+  {
+   "external_id": "M-1023",
+   "title": "Parks Board Meeting",
+   "body_name": "Parks Board",
+   "meeting_date": "2026-07-23",
+   "start_time": null,
+   "location": null,
+   "status": "scheduled",
+   "agenda_url": null
+  },
+  {
+   "external_id": "M-1024",
+   "title": "Finance Committee Meeting",
+   "body_name": "Finance Committee",
+   "meeting_date": "2026-08-01",
+   "start_time": "14:00:00",
+   "location": "Public Library Annex",
+   "status": "scheduled",
+   "agenda_url": null
+  },
+  {
+   "external_id": "M-1025",
+   "title": "Zoning Board Meeting",
+   "body_name": "Zoning Board",
+   "meeting_date": "2026-08-10",
+   "start_time": "18:00:00",
+   "location": "Council Chamber, City Hall",
+   "status": "scheduled",
+   "agenda_url": null
+  }
+ ]
+}

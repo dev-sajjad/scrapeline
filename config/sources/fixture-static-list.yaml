@@ -1,0 +1,18 @@
+id: fixture-static-list
+name: "Fixture — Static paginated list"
+platform: fixture
+kind: html
+entry: ${FIXTURE_BASE_URL}/static-list/
+jurisdiction: { id: xx-fixtureville, name: Fixtureville, country: XX }
+cadence: daily
+politeness: { rps: 5, concurrency: 1, respect_robots: true }
+legal:
+  terms_checked: 2026-11-17
+  notes: "Fixture site owned by this project."
+schema: Meeting
+adapter: scrapeline.adapters.declarative:DeclarativeAdapter
+pagination: next-link
+max_pages_per_run: 10
+status: active
+config_version: 1
+quality: { min_records: 20, max_records: 30 }

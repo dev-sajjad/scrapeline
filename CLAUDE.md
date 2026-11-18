@@ -309,7 +309,8 @@ Real-source rules: register only official/public endpoints; fill the `legal:` bl
 - [ ] `quality/antibot.py`: detect 403/429/challenge shells/empty renders → backoff + incident, never retry past policy.
 - [ ] `store/raw.py`; `ops/queue.py` (SKIP LOCKED, lease, heartbeat, dead-letter); `scrapeline worker`.
 - [ ] `adapters/base.py` + `registry/` with status machine.
-- [ ] Platform adapters: Legistar Web API (step 2) and CivicPlus AgendaCenter (step 3), each registered for ≥3 real jurisdictions with snapshot tests.
+- [x] Platform adapter: Legistar Web API (step 2) — Seattle, Oakland, Denver; snapshot tests. (sfgov retired: tenant returns 400.)
+- [ ] Platform adapter: CivicPlus AgendaCenter. Finding 2026-11-17: rows load via `POST /AgendaCenter/UpdateCategoryList {year, catID}` per category; needs `FetchClient.post` (same policy) or BrowserPool expanding categories. `/RSS.aspx` is robots-disallowed on sampled sites.
 - [ ] Hand-written site adapters for the 4 base fixture sites; integration tests green.
 - [ ] ADR-0005: URL policy v1 scope (IP pinning deferred, reasons, residual risk).
 - [ ] Migration 0001.

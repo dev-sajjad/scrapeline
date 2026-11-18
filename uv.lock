@@ -1126,7 +1126,7 @@ requires-dist = [
     { name = "pymupdf", specifier = ">=1.25" },
     { name = "python-dateutil", specifier = ">=2.9" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "selectolax", specifier = ">=0.3" },
+    { name = "selectolax", specifier = ">=1.0" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "structlog", specifier = ">=25.1" },
     { name = "tenacity", specifier = ">=9.0" },

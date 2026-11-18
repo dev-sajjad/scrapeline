@@ -10,7 +10,7 @@ dependencies = [
     "httpx>=0.28",
     "tenacity>=9.0",
     "playwright==1.65.2",           # pinned: must match the docker base image tag
-    "selectolax>=0.3",
+    "selectolax>=1.0",
     "beautifulsoup4>=4.13",
     "pydantic>=2.10",
     "pydantic-settings>=2.7",
@@ -67,7 +67,7 @@ ignore = ["S101"]
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S", "T20"]
 "alembic/**" = ["N", "E501"]
-"scripts/**" = ["T20", "S"]
+"scripts/**" = ["T20", "S", "E501"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -77,7 +77,7 @@ mypy_path = "src"
 exclude = ["tests/sites/", "tests/generated/"]
 
 [[tool.mypy.overrides]]
-module = ["protego.*", "fitz.*", "pymupdf.*", "selectolax.*"]
+module = ["protego.*", "fitz.*", "pymupdf.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
@@ -89,6 +89,11 @@ markers = [
     "browser: needs Playwright chromium installed",
 ]
 addopts = "-m 'not integration and not llm and not generated and not browser'"
+filterwarnings = ["ignore:builtin type swig:DeprecationWarning"]
 
 [tool.coverage.run]
 source = ["scrapeline"]
+
+[[tool.mypy.overrides]]
+module = ["scrapeline.pipeline.documents"]
+disallow_untyped_calls = false  # pymupdf ships without type hints
