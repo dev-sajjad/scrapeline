@@ -9,7 +9,7 @@ dependencies = [
     "anthropic>=1.1",
     "httpx>=0.28",
     "tenacity>=9.0",
-    "playwright>=1.50",
+    "playwright==1.65.2",           # pinned: must match the docker base image tag
     "selectolax>=0.3",
     "beautifulsoup4>=4.13",
     "pydantic>=2.10",
@@ -17,9 +17,7 @@ dependencies = [
     "sqlalchemy>=2.0",
     "psycopg[binary]>=3.2",
     "alembic>=1.14",
-    "boto3>=1.36",
-    "pyarrow>=19.0",
-    "duckdb>=1.2",
+    "pandas>=2.2",
     "structlog>=25.1",
     "typer>=0.15",
     "pyyaml>=6.0",
@@ -28,20 +26,23 @@ dependencies = [
     "protego>=0.4",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "pytest>=8.3",
-    "pytest-asyncio>=0.25",
     "pytest-cov>=6.0",
     "respx>=0.22",
     "ruff>=0.9",
     "mypy>=1.14",
     "types-PyYAML",
+    "types-python-dateutil",
+    "pandas-stubs",
     "pre-commit>=4.0",
 ]
-serve = ["fastapi>=0.115", "uvicorn[standard]>=0.34", "streamlit>=1.41"]
-airflow = ["apache-airflow>=3.0"]
-dbt = ["dbt-postgres>=1.9"]
+
+[project.optional-dependencies]
+# Later slices. Installed explicitly (`uv sync --extra serve`), never by default.
+serve = ["fastapi>=0.115", "uvicorn[standard]>=0.34"]
+s3 = ["boto3>=1.36"]
 
 [project.scripts]
 scrapeline = "scrapeline.cli:app"
@@ -57,26 +58,37 @@ packages = ["src/scrapeline"]
 line-length = 100
 target-version = "py312"
 src = ["src", "tests"]
+extend-exclude = ["tests/sites", "tests/generated", "*.md"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "N", "S", "T20", "RUF"]
-ignore = ["S101"]  # assert in tests
+ignore = ["S101"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S", "T20"]
+"alembic/**" = ["N", "E501"]
+"scripts/**" = ["T20", "S"]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
 mypy_path = "src"
+exclude = ["tests/sites/", "tests/generated/"]
+
+[[tool.mypy.overrides]]
+module = ["protego.*", "fitz.*", "pymupdf.*", "selectolax.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-asyncio_mode = "auto"
 markers = [
-    "integration: needs docker compose services (postgres, minio, fixture sites)",
+    "integration: needs docker compose services (postgres, fixture sites)",
     "generated: agent-proposed tests under tests/generated; not trusted",
     "llm: calls the Anthropic API and costs money",
+    "browser: needs Playwright chromium installed",
 ]
-addopts = "-m 'not integration and not llm and not generated'"
+addopts = "-m 'not integration and not llm and not generated and not browser'"
+
+[tool.coverage.run]
+source = ["scrapeline"]
