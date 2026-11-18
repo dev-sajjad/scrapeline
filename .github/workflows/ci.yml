@@ -10,7 +10,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv python install 3.12
-      - run: uv sync --frozen
+      - run: uv sync --frozen --extra serve
       - run: uv run ruff check . && uv run ruff format --check .
       - run: uv run mypy src
       - run: uv run pytest --cov --cov-report=term-missing
@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv python install 3.12
-      - run: uv sync --frozen
+      - run: uv sync --frozen --extra serve
       - run: uv run playwright install --with-deps chromium
       - run: docker compose up -d --wait
       # test_agents_db runs the tester through `docker run scrapeline-sandbox:latest`;
@@ -51,5 +51,5 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv python install 3.12
-      - run: uv sync --frozen
+      - run: uv sync --frozen --extra serve
       - run: uv run pytest -m generated tests/generated --no-header -q || true
