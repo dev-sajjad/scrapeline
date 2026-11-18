@@ -1,4 +1,4 @@
-"""Idempotent upsert with lineage and change detection (CLAUDE.md §4.1).
+"""Idempotent upsert with lineage and change detection.
 
 new identity              -> INSERT (first_seen_at = last_seen_at = now)
 same identity, new hash   -> UPDATE content + lineage, bump last_seen_at

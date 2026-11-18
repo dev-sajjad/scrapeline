@@ -218,7 +218,7 @@ def _reject(record_type: str, data: dict[str, Any], reason: str) -> Any:
     return Reject(record_type=record_type, data=safe, reason=reason)
 
 
-# -- runtime adapter (not used inside the sandbox) -------------------------------------------
+# Runtime adapter (not used inside the sandbox)
 
 SITES_DIR = Path(__file__).resolve().parent / "sites"
 

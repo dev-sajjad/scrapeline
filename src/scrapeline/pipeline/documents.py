@@ -1,4 +1,4 @@
-"""Document download + text extraction (CLAUDE.md phase 5).
+"""Document download + text extraction.
 
 Download goes through FetchClient (URL policy, robots, rate limit); bytes land in the raw store.
 Text: PyMuPDF text layer first; pages with almost no text flag `needs_ocr`; OCR runs only when

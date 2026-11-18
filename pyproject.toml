@@ -40,7 +40,7 @@ dev = [
 ]
 
 [project.optional-dependencies]
-# Later slices. Installed explicitly (`uv sync --extra serve`), never by default.
+# Optional extras, installed explicitly (`uv sync --extra serve`), never by default.
 serve = ["fastapi>=0.115", "uvicorn[standard]>=0.34"]
 s3 = ["boto3>=1.36"]
 

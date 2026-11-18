@@ -81,7 +81,7 @@ class Instruction(_Strict):
 class SourceConfig(_Strict):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{1,99}$")
     name: str
-    platform: str  # legistar | civicplus | custom | fixture
+    platform: str  # legistar | custom | fixture
     tenant: str | None = None
     kind: Literal["api", "html", "js", "pdf_index"]
     entry: str

@@ -1,7 +1,7 @@
 """Immutable, content-addressed raw store. Key: <source>/<yyyy>/<mm>/<dd>/<sha256>.<ext>.
 
 Bytes are written once and never modified; writing the same bytes again is a no-op.
-Filesystem backend now; an S3 backend implements the same protocol later (step 6).
+Backends implement the `RawStore` protocol; `FilesystemRawStore` is the default.
 """
 
 from __future__ import annotations

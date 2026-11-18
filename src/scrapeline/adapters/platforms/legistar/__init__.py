@@ -60,8 +60,6 @@ class LegistarAdapter(BaseAdapter):
             meta={"filter": flt, "skip": skip},
         )
 
-    # -- pure -------------------------------------------------------------------------------
-
     def parse(self, raw: RawDoc) -> ParseResult:
         try:
             payload: Any = json.loads(raw.content)

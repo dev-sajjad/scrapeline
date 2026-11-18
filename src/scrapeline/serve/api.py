@@ -1,4 +1,4 @@
-"""Read-only HTTP API over normalised data and ops tables (phase 8).
+"""Read-only HTTP API over normalised data and ops tables.
 
 uv run uvicorn scrapeline.serve.api:app --port 8000
 """

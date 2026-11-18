@@ -1,4 +1,4 @@
-"""robots.txt cache (protego). 4xx = no rules (allow); 5xx/network error = disallow all for now."""
+"""robots.txt cache (protego). 4xx = no rules (allow); 5xx/network error = disallow all."""
 
 from __future__ import annotations
 

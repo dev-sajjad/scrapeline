@@ -1,4 +1,4 @@
-"""Typed exceptions. Never return an empty list to mean failure (CLAUDE.md §6)."""
+"""Typed exceptions. Never return an empty list to mean failure."""
 
 from __future__ import annotations
 
@@ -13,9 +13,6 @@ class ConfigError(ScrapelineError):
 
 class StatusTransitionError(ConfigError):
     """Illegal source status transition (e.g. retired -> active)."""
-
-
-# --- fetch -----------------------------------------------------------------
 
 
 class FetchError(ScrapelineError):
@@ -61,9 +58,6 @@ class HTTPStatusError(FetchError):
         self.status = status
 
 
-# --- parse / pipeline ------------------------------------------------------
-
-
 class ParseError(ScrapelineError):
     """Adapter could not interpret a raw document."""
 
@@ -74,9 +68,6 @@ class EmptyResultError(ParseError):
 
 class QualityCheckError(ScrapelineError):
     """A blocking quality check failed."""
-
-
-# --- agents ----------------------------------------------------------------
 
 
 class AgentError(ScrapelineError):

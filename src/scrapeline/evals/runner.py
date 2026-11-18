@@ -1,5 +1,5 @@
 """Eval engine (no LLM of its own): runs a driver over benchmark cases, grades with the
-deterministic tester, computes CLAUDE.md §5.4 metrics, stores evals.run / evals.case_result.
+deterministic tester, computes eval metrics, stores evals.run / evals.case_result.
 """
 
 from __future__ import annotations

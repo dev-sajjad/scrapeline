@@ -1,4 +1,4 @@
-"""Repair agent orchestration (CLAUDE.md §0.4, §5.2). Bounded, scope-limited, escalates.
+"""Repair agent orchestration. Bounded, scope-limited, escalates.
 
 Flow per drift case:
   baseline tester on the current spec  -> passes? no repair needed (no LLM call, zero cost)
@@ -164,9 +164,8 @@ def repair_case(
         tools = as_beta_tools(functions) if driver.name == "anthropic" else list(functions.values())
         out = driver(system=system, user=feedback, tools=tools, max_iterations=MAX_ITERATIONS)
         candidate = ws.spec_path.read_text()
-        final = evaluate_spec(
-            candidate, case_dir, golden_path, settings, mode=sandbox_mode
-        )  # independent
+        # Re-test independently: the agent's own claim is not evidence.
+        final = evaluate_spec(candidate, case_dir, golden_path, settings, mode=sandbox_mode)
         outcome = (
             "passed"
             if final.passed
