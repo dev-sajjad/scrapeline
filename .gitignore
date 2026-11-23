@@ -12,3 +12,6 @@ dbt/logs/
 airflow/logs/
 *.parquet
 .DS_Store
+
+# Agent worktrees
+.claude/worktrees/
