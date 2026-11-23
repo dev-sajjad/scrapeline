@@ -18,7 +18,8 @@ from sqlalchemy.exc import IntegrityError
 from scrapeline.adapters.base import BaseAdapter
 from scrapeline.adapters.rawdoc import ParseResult, RawDoc, Target
 from scrapeline.catalog.datasets import DatasetType, default_registry, resolve_model
-from scrapeline.errors import DatasetError
+from scrapeline.errors import ConfigError, DatasetError
+from scrapeline.ops import runs
 from scrapeline.ops.events import Event
 from scrapeline.pipeline.load import LoadContext, Provenance
 from scrapeline.pipeline.models import Record
@@ -157,6 +158,29 @@ class ExplodingStore(PostgresRecordStore):
     ) -> RecordLoadStats:
         super().load(conn, ctx, dataset, items)
         raise self.error
+
+
+class LockProbeStore(PostgresRecordStore):
+    """Records whether another session could take the source lock while records load."""
+
+    def __init__(self, engine: Engine) -> None:
+        self.engine = engine
+        self.lock_was_free: list[bool] = []
+
+    def load(
+        self,
+        conn: Connection,
+        ctx: LoadContext,
+        dataset: DatasetType,
+        items: Iterable[tuple[Record, Provenance]],
+    ) -> RecordLoadStats:
+        with self.engine.connect() as other:
+            free = runs.try_source_lock(other, ctx.source_id)
+            if free:
+                runs.release_source_lock(other, ctx.source_id)
+            other.commit()
+        self.lock_was_free.append(free)
+        return super().load(conn, ctx, dataset, items)
 
 
 class FakeShop:
@@ -515,6 +539,22 @@ def test_reprocess_of_a_generic_source_is_idempotent(
     assert summary.status == "succeeded"
     assert summary.loaded["product"] == loaded(unchanged=5)
     assert count(clean_db, t.record_versions) == 5
+
+
+def test_reprocess_takes_the_source_lock_like_a_run(
+    make_runner: Callable[..., Runner], clean_db: Engine
+) -> None:
+    make_runner().run(SHOP.id)
+    with clean_db.connect() as other:
+        assert runs.try_source_lock(other, SHOP.id)
+        with pytest.raises(ConfigError, match="in progress"):
+            make_runner().reprocess(SHOP.id)
+        runs.release_source_lock(other, SHOP.id)
+        other.commit()
+    assert count(clean_db, t.run, t.run.c.kind == "reprocess") == 0
+    probe = LockProbeStore(clean_db)
+    assert make_runner(store=probe).reprocess(SHOP.id).status == "succeeded"
+    assert probe.lock_was_free == [False]
 
 
 def test_typed_legistar_run_keeps_its_tables_and_publishes_events(

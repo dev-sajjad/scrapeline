@@ -11,7 +11,8 @@ from __future__ import annotations
 import time
 import uuid
 from collections import Counter, deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Literal
@@ -220,22 +221,40 @@ class Runner:
     ) -> RunSummary:
         cfg = self.source(source_id)
         adapter = self.adapter_factory(cfg)
-        with self.engine.connect() as lock_conn:
-            if not runs.try_source_lock(lock_conn, cfg.id):
-                raise ConfigError(f"another run of {cfg.id} is in progress")
+        with self._source_lock(cfg):
             try:
                 return self._run_locked(cfg, adapter, kind, since, until, force)
             finally:
                 if self._browser is not None:
                     self._browser.close()
                     self._browser = None
-                runs.release_source_lock(lock_conn, cfg.id)
-                lock_conn.commit()
 
     def reprocess(self, source_id: str, *, since: datetime | None = None) -> RunSummary:
         """Rebuild normalised rows from stored raw (after a parser or schema change)."""
         cfg = self.source(source_id)
         adapter = self.adapter_factory(cfg)
+        with self._source_lock(cfg):
+            return self._reprocess_locked(cfg, adapter, since)
+
+    @contextmanager
+    def _source_lock(self, cfg: SourceConfig) -> Iterator[None]:
+        """Hold the source's advisory lock: one writer per source across processes.
+
+        Runs and reprocessing both take it, because the record store numbers versions from
+        the rows it reads at the start of a load.
+        """
+        with self.engine.connect() as lock_conn:
+            if not runs.try_source_lock(lock_conn, cfg.id):
+                raise ConfigError(f"another run of {cfg.id} is in progress")
+            try:
+                yield
+            finally:
+                runs.release_source_lock(lock_conn, cfg.id)
+                lock_conn.commit()
+
+    def _reprocess_locked(
+        self, cfg: SourceConfig, adapter: Adapter, since: datetime | None
+    ) -> RunSummary:
         with self.engine.begin() as conn:
             dataset = self._prepare(conn, cfg, force=True)
             version_id = runs.scraper_version(
