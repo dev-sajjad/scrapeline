@@ -133,6 +133,7 @@ fetch_log = Table(
     Column("meta", JSONB, nullable=False, server_default="{}"),
     Column("error", Text),
     _ts("fetched_at"),
+    _ts("created_at", default=True),
     schema="raw",
 )
 

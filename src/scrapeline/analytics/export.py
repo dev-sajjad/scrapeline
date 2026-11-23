@@ -392,6 +392,11 @@ class ParquetLakeExporter:
             return
         with self.engine.connect() as conn:
             query = self._query(table.name, conn)
+            if query.watermark is not None and query.watermark.name != table.watermark:
+                raise ConfigError(
+                    f"{table.name}: query watermark {query.watermark.name!r} does not match "
+                    f"the layout's {table.watermark!r}"
+                )
             stmt = query.select
             if query.watermark is not None:
                 stmt = stmt.where(*_window(query.watermark, table, previous, cutoff))
@@ -472,7 +477,7 @@ class ParquetLakeExporter:
                         fetch.c.fetched_at,
                         fetch.c.error,
                     ),
-                    fetch.c.fetched_at,
+                    fetch.c.created_at,
                     _host_only,
                 )
             case "agent_runs":

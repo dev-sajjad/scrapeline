@@ -121,8 +121,8 @@ TABLES: dict[str, LakeTable] = {
             ),
             ("date",),
             partition_time="fetched_at",
-            watermark="fetched_at",
-            late_commits="overlap",
+            watermark="created_at",  # fetched_at is set by the worker and can commit late
+            late_commits="cutoff",
         ),
         LakeTable(
             "agent_runs",

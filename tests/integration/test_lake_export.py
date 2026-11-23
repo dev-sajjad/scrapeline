@@ -18,7 +18,7 @@ from typer.testing import CliRunner
 from scrapeline import settings as settings_module
 from scrapeline.analytics import export as export_module
 from scrapeline.analytics.export import ParquetLakeExporter
-from scrapeline.analytics.layout import STATE_PATH, TABLES
+from scrapeline.analytics.layout import OVERLAP, STATE_PATH, TABLES
 from scrapeline.catalog.datasets import (
     DatasetRegistry,
     DatasetType,
@@ -419,6 +419,23 @@ def test_a_version_committed_late_by_an_older_transaction_is_not_lost(
     assert (first.rows["record_versions"], second.rows["record_versions"]) == (0, 2)
     exported = sorted(row["external_id"] for row in read(lake, "record_versions"))
     assert exported == [url("late"), url("quick")]
+
+
+def test_a_fetch_older_than_the_overlap_that_commits_late_is_still_exported(
+    engine: Engine, exporter: ParquetLakeExporter, lake: Path
+) -> None:
+    ctx = new_run(engine)
+    now = datetime.now(UTC)
+    log_fetch(engine, ctx, now - timedelta(minutes=1))
+    exporter.export(tables=["fetch_log"])
+    # A run longer than the overlap writes its first fetch at the end: hours old, committed now.
+    log_fetch(engine, ctx, now - OVERLAP - timedelta(hours=2))
+    late = exporter.export(tables=["fetch_log"])
+
+    assert late.rows["fetch_log"] == 1
+    with engine.connect() as conn:
+        stored = sorted(conn.execute(select(t.fetch_log.c.id)).scalars())
+    assert sorted(row["id"] for row in read(lake, "fetch_log")) == stored
 
 
 def test_a_fetch_logged_late_within_the_overlap_is_exported_once(
