@@ -3,19 +3,23 @@
 Parquet files live under `settings.lake_dir` (default `data/lake/`). Append tables are
 immutable files partitioned Hive-style (read with `hive_partitioning = true`); each export
 writes new files and never rewrites old ones. Snapshot tables are rewritten whole on every
-export. `date` partitions are the UTC date of the table's time column: `valid_from` for
-record_versions, `finished_at` for runs (finished runs only), `created_at` or `fetched_at`
-for the others.
+export. A `date` partition is the UTC date of the table's `partition_time` column.
 
-Incremental export: each append table keeps a watermark on its time column in `STATE_PATH`.
-An export reads rows with time > watermark - OVERLAP and time <= the export's cutoff, so rows
-committed late are not skipped. Duplicates across exports are therefore expected: staging
-models dedupe on the primary key (version_id, run_id, id).
+Incremental export selects new rows by each table's `watermark` column, kept per table in
+`STATE_PATH`, using one of two rules so that rows committed late are never skipped:
 
-`dataset_version` comes from record_versions.schema_version. Validity intervals (valid_to,
-is_current) are derived in dbt by ordering each record's versions by `version`, so the lake
-stays append-only. Personal-data fields are removed from payloads unless the source's usage
-allows them.
+- "cutoff": the watermark column is set by the database at insert (`now()`, the transaction
+  start). The export's cutoff is the earliest of now() and the start time of every other open
+  transaction; rows with watermark <= cutoff are all committed, so the export reads
+  (previous cutoff, cutoff] exactly.
+- "overlap": the watermark column is set by the application, so commits can arrive late. The
+  export reads rows with watermark > previous watermark - OVERLAP.
+
+Duplicates across exports are possible either way: staging models dedupe on the primary key
+(version_id, run_id, id). `dataset_version` comes from record_versions.schema_version.
+Validity intervals (valid_to, is_current) are derived in dbt by ordering each record's
+versions by `version`, so the lake stays append-only. Personal-data fields are removed from
+payloads unless the source's usage allows them.
 """
 
 from __future__ import annotations
@@ -43,6 +47,9 @@ class LakeTable:
     path: str  # relative to the lake root; {placeholders} are partition values or export_id
     columns: tuple[LakeColumn, ...]
     partition_by: tuple[str, ...] = ()
+    partition_time: str | None = None  # DB column whose UTC date is the `date` partition
+    watermark: str | None = None  # DB column that selects new rows for incremental export
+    late_commits: Literal["cutoff", "overlap"] | None = None
 
     @property
     def glob(self) -> str:
@@ -68,9 +75,13 @@ TABLES: dict[str, LakeTable] = {
                 "version_id:BIGINT record_id:BIGINT source_id:VARCHAR dataset:VARCHAR "
                 "dataset_version:INTEGER external_id:VARCHAR version:INTEGER "
                 "change_type:VARCHAR valid_from:TIMESTAMPTZ content_hash:VARCHAR payload:JSON "
-                "run_id:VARCHAR raw_sha256:VARCHAR scraper_version_id:INTEGER"
+                "run_id:VARCHAR raw_sha256:VARCHAR scraper_version_id:INTEGER "
+                "created_at:TIMESTAMPTZ"
             ),
             ("dataset", "date"),
+            partition_time="valid_from",
+            watermark="created_at",
+            late_commits="cutoff",
         ),
         LakeTable(
             "runs",
@@ -82,6 +93,9 @@ TABLES: dict[str, LakeTable] = {
                 "stats:JSON error:VARCHAR"
             ),
             ("date",),
+            partition_time="finished_at",
+            watermark="finished_at",
+            late_commits="overlap",
         ),
         LakeTable(
             "check_results",
@@ -92,6 +106,9 @@ TABLES: dict[str, LakeTable] = {
                 "value:DOUBLE threshold:VARCHAR created_at:TIMESTAMPTZ"
             ),
             ("date",),
+            partition_time="created_at",
+            watermark="created_at",
+            late_commits="cutoff",
         ),
         LakeTable(
             "fetch_log",
@@ -103,6 +120,9 @@ TABLES: dict[str, LakeTable] = {
                 "fetched_at:TIMESTAMPTZ error:VARCHAR"
             ),
             ("date",),
+            partition_time="fetched_at",
+            watermark="fetched_at",
+            late_commits="overlap",
         ),
         LakeTable(
             "agent_runs",
@@ -114,6 +134,9 @@ TABLES: dict[str, LakeTable] = {
                 "cost_usd:DOUBLE started_at:TIMESTAMPTZ finished_at:TIMESTAMPTZ"
             ),
             ("date",),
+            partition_time="started_at",
+            watermark="finished_at",
+            late_commits="overlap",
         ),
         LakeTable(
             "classification_log",
@@ -125,6 +148,9 @@ TABLES: dict[str, LakeTable] = {
                 "created_at:TIMESTAMPTZ"
             ),
             ("date",),
+            partition_time="created_at",
+            watermark="created_at",
+            late_commits="cutoff",
         ),
         LakeTable(
             "incidents",

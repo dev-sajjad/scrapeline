@@ -178,5 +178,6 @@ def test_lake_layout_paths_are_consistent() -> None:
         if table.mode == "append":
             assert table.path.startswith(f"{table.name}/") and "{export_id}" in table.path
             assert all(f"{p}={{{p}}}" in table.path for p in table.partition_by)
+            assert table.partition_time and table.watermark and table.late_commits
         else:
             assert table.path.startswith("snapshots/") and not table.partition_by

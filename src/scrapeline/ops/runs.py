@@ -10,6 +10,7 @@ from sqlalchemy import Connection, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
 from scrapeline.catalog.repository import ensure_site
+from scrapeline.errors import StatusTransitionError
 from scrapeline.registry.config import SourceConfig, check_transition
 from scrapeline.store import tables as t
 
@@ -55,10 +56,16 @@ def sync_source(conn: Connection, cfg: SourceConfig) -> str:
 
 
 def set_status(conn: Connection, source_id: str, new: str, note: str | None = None) -> None:
-    current = conn.execute(
-        select(t.sources.c.status).where(t.sources.c.id == source_id)
-    ).scalar_one()
+    """Validated status change. Activation needs a reviewed `legal` block."""
+    current, config = conn.execute(
+        select(t.sources.c.status, t.sources.c.config).where(t.sources.c.id == source_id)
+    ).one()
     check_transition(current, new)
+    if new == "active" and not SourceConfig.model_validate(config).terms_reviewed:
+        raise StatusTransitionError(
+            f"{source_id}: review the site's terms and robots.txt and set legal.terms_checked "
+            "before activating"
+        )
     conn.execute(
         update(t.sources)
         .where(t.sources.c.id == source_id)

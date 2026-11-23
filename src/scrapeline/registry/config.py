@@ -24,6 +24,10 @@ from scrapeline.pipeline.locale import Locale
 
 Status = Literal["draft", "active", "broken", "retired"]
 Pagination = Literal["none", "next-link", "page-number", "cursor", "load-more", "offset"]
+Cadence = Literal["manual", "hourly", "daily", "weekly"]
+
+# Placeholder for a legal review that has not happened; such a source cannot be activated.
+UNREVIEWED_TERMS = date(1970, 1, 1)
 
 TRANSITIONS: dict[str, frozenset[str]] = {
     "draft": frozenset({"active", "broken", "retired"}),
@@ -105,7 +109,7 @@ class SourceConfig(_Strict):
     entry: str
     jurisdiction: Jurisdiction | None = None
     allowed_hosts: list[str] = Field(default_factory=list)
-    cadence: str = "daily"
+    cadence: Cadence = "daily"
     politeness: Politeness = Politeness()
     legal: Legal
     schema_: str = Field(default="Meeting", alias="schema")
@@ -137,6 +141,10 @@ class SourceConfig(_Strict):
         if self.dataset is None and self.schema_ in SCHEMAS and self.jurisdiction is None:
             raise ValueError(f"schema {self.schema_} needs a jurisdiction")
         return self
+
+    @property
+    def terms_reviewed(self) -> bool:
+        return self.legal.terms_checked != UNREVIEWED_TERMS
 
     @property
     def dataset_name(self) -> str:

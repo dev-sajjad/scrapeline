@@ -11,10 +11,10 @@ from sqlalchemy.exc import IntegrityError
 from scrapeline.catalog.datasets import DatasetRegistry, DatasetType, FieldDef, default_registry
 from scrapeline.catalog.repository import ensure_site, sync_dataset_types
 from scrapeline.catalog.sites import SITE_CATEGORIES
-from scrapeline.errors import DatasetError
+from scrapeline.errors import DatasetError, StatusTransitionError
 from scrapeline.ops import events
 from scrapeline.ops.events import EVENTS_CHANNEL, Event, PostgresEventBus
-from scrapeline.ops.runs import sync_source
+from scrapeline.ops.runs import set_status, sync_source
 from scrapeline.registry.config import SourceConfig
 from scrapeline.store import tables as t
 
@@ -125,3 +125,25 @@ def test_published_events_are_stored_and_notified(clean_db: Engine) -> None:
         row = conn.execute(select(t.event).where(t.event.c.id == payload["id"])).one()
     assert payload["kind"] == row.kind == "run.started"
     assert row.data == {"pages": 3} and row.source_id == "books"
+
+
+def test_a_source_with_unreviewed_terms_cannot_be_activated(clean_db: Engine) -> None:
+    base = {
+        "name": "Books",
+        "platform": "custom",
+        "kind": "html",
+        "entry": "https://books.toscrape.com/",
+        "dataset": "product",
+        "adapter": "scrapeline.adapters.declarative:DeclarativeAdapter",
+    }
+    unreviewed = {"terms_checked": "1970-01-01", "notes": "Needs review."}
+    reviewed = {"terms_checked": "2026-11-24", "notes": "Practice site; robots allows."}
+    with clean_db.begin() as conn:
+        sync_source(
+            conn, SourceConfig.model_validate({**base, "id": "draft-a", "legal": unreviewed})
+        )
+        sync_source(conn, SourceConfig.model_validate({**base, "id": "draft-b", "legal": reviewed}))
+    with pytest.raises(StatusTransitionError, match="terms"), clean_db.begin() as conn:
+        set_status(conn, "draft-a", "active")
+    with clean_db.begin() as conn:
+        set_status(conn, "draft-b", "active")
