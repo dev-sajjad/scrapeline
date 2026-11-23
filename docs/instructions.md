@@ -103,6 +103,6 @@ Some fields are marked as personal data (`pii`), such as `article.author`. Colle
 
 ## Safety
 
-- Instruction text is untrusted. Files are written with a YAML serialiser, so quotes or newlines in `collect` or `name` cannot add keys to the source config. Text containing `${NAME}` is refused, because source configs expand such references from the environment.
+- Instruction text is untrusted. Files are written with a YAML serialiser, so quotes or newlines in `collect` or `name` cannot add keys to the source config. Any text containing `${` is refused (`${NAME}`, `${NAME:-default}` or any later form), because source configs expand such references from the environment.
 - Every URL still goes through the URL policy, robots.txt and the rate limit when the trusted worker fetches it (`capture`, `run`). Agents never fetch pages themselves.
 - Blocked responses (403, 429, challenge pages) are detected and handled, never evaded.

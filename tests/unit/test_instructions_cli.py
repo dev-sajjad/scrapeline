@@ -142,10 +142,13 @@ def test_apply_cannot_be_injected_through_instruction_text(
     assert spec["schema"] == "shelf_item"
 
 
-def test_apply_refuses_environment_references(tmp_path: Path, dirs: dict[str, Path]) -> None:
-    text = NEW_DATASET.replace("Every listed book", "Every ${HOME} book")
+@pytest.mark.parametrize("reference", ["${HOME}", "${ANTHROPIC_API_KEY:-unset}"])
+def test_apply_refuses_environment_references(
+    tmp_path: Path, dirs: dict[str, Path], reference: str
+) -> None:
+    text = NEW_DATASET.replace("Every listed book", f"Every {reference} book")
     code, out = apply(write(tmp_path, text), dirs)
-    assert code == 1 and "${NAME}" in out["error"]
+    assert code == 1 and 'contain "${"' in out["error"]
     assert not dirs["sources"].exists()
 
 

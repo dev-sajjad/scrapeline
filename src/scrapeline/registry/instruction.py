@@ -180,8 +180,9 @@ _TRANSFORMS = {
     "datetime": "datetime",
     "time": "time",
 }
-# load_source_file expands ${NAME} from the environment, so untrusted text must not carry one.
-_ENV_REFERENCE = re.compile(r"\$\{[A-Z0-9_]+\}")
+# load_source_file expands ${NAME} (and later forms such as ${NAME:-default}) from the
+# environment, so the rendered config must not contain "${" at all.
+_ENV_MARKER = "${"
 
 
 @dataclass(frozen=True)
@@ -301,8 +302,11 @@ def compile_instruction(ins: ScrapeInstruction, registry: DatasetRegistry) -> Co
         source = SourceConfig.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(f"instruction does not compile to a valid source: {exc}") from exc
-    if _ENV_REFERENCE.search(render_source_yaml(source)):
-        raise ConfigError("instruction text may not contain ${NAME} references")
+    if _ENV_MARKER in render_source_yaml(source):
+        raise ConfigError(
+            'instruction text may not contain "${": source configs expand ${...} '
+            "from the environment"
+        )
     return CompiledInstruction(
         source=source,
         dataset_type=dataset,

@@ -288,9 +288,16 @@ def test_text_with_quotes_and_newlines_cannot_inject_keys() -> None:
     assert loaded.instruction is not None and loaded.instruction.collect == collect
 
 
-def test_environment_references_are_refused() -> None:
-    text = BASE.replace("Every book:", "Every ${ANTHROPIC_API_KEY} book:")
-    with pytest.raises(ConfigError, match=r"\$\{NAME\}"):
+@pytest.mark.parametrize(
+    "reference",
+    ["${ANTHROPIC_API_KEY}", "${ANTHROPIC_API_KEY:-x}", "${anything else}"],
+    ids=["plain", "with-default", "any-form"],
+)
+def test_environment_references_are_refused(reference: str) -> None:
+    # Source configs expand ${...} from the environment when loaded, so a reference in the
+    # instruction text would put a secret into the config and the generator prompt.
+    text = BASE.replace("Every book:", f"Every {reference} book:")
+    with pytest.raises(ConfigError, match=r'contain "\$\{"'):
         compile_instruction(ScrapeInstruction.from_yaml(text + "dataset: product\n"), REGISTRY)
 
 
