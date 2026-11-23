@@ -94,18 +94,19 @@ src/scrapeline/
   cli/               typer commands, one module per area, each exposes register(app) (auto-discovered)
   settings.py        pydantic-settings from .env
   catalog/           datasets.py (schema registry), packs/*.yaml (built-in dataset types), sites.py
-                     (taxonomy + classifier contract), repository.py (DB), classify.py (wave 2)
+                     (taxonomy + classifier contract), repository.py (DB), classify.py (rules + page evidence)
   registry/          config.py (source config), instruction.py (scrape instruction + compile)
   fetch/             urlpolicy.py, limiter.py, robots.py, client.py (httpx), browser.py (Playwright pool), pagination.py
   store/             raw.py, db.py, tables.py (Core tables = migrations)
   adapters/          base.py, declarative.py (spec.yaml engine); platforms/<vendor>/; sites/<source_id>/spec.yaml
   pipeline/          models.py (typed civic pack), values.py (Money), locale.py, normalise.py, identity.py,
-                     load.py (typed tables), records.py (generic store + history), runner.py, documents.py
+                     load.py (typed tables), records.py (generic store + history), runner.py (facade),
+                     crawl.py, ingest.py, finalise.py, documents.py
   quality/           checks.py, drift.py, incidents.py, antibot.py, golden.py
   ops/               queue.py, worker.py, runs.py, events.py (ops.event + pg_notify), logging.py
   agents/            llm.py, generator.py, repairer.py, tester.py, sandbox_harness.py, tools/, prompts/
   evals/             runner.py
-  analytics/         layout.py (lake contract), export.py (Parquet exporter, wave 2)
+  analytics/         layout.py (lake contract), export.py (Parquet exporter)
   serve/             api.py (read API), panel/ (control panel, wave 3)
 alembic/             migrations
 config/sources/      one YAML per source        config/datasets/   user-defined dataset types
@@ -162,6 +163,7 @@ Upgrade process: SDK or framework major bump = branch, run `tests/unit/test_llm_
 | 0002 | `jurisdictions`, `bodies` (council, committee, board), `meetings`, `agenda_items`, `documents`, `pipeline.rejects` |
 | 0003 | `ops.check_result`, `ops.incident`, `ops.metric_daily` |
 | 0004 | `ops.agent_run`, `ops.agent_tool_call`, `evals.run`, `evals.case_result` |
+| 0006 | `raw.fetch_log.created_at` (database-set ingest time; lake export uses the exact cutoff rule) |
 | 0005 | `catalog.site_category` (seeded, taxonomy v1), `catalog.site`, `catalog.classification_log`, `catalog.dataset_type`, `data.records`, `data.record_versions`, `ops.event`; `sources.site_id`, `sources.dataset` |
 
 Nothing may be read from a table that has no migration yet.
@@ -277,8 +279,8 @@ Flow: instruction → validate (URL policy, robots, usage) → worker captures s
 |---|---|---|
 | 0 | Contracts: schema registry and packs, locale and money types, site taxonomy, scrape instruction, events, record-store and lake interfaces, migration 0005, ADR-0006/7/8, CLI split | done 2026-11-24 |
 | 1 | Generic data: record store with history, locale-aware parsing, instruction compile | done 2026-11-24 (3 builders, 3 reviewers, 24 findings, 22 fixed) |
-| 2 | Demo sources, lake export, dbt, site classifier, runner split + layer contracts | in progress |
-| 3 | Control panel: read-only pages, data and lineage views, live events | planned |
+| 2 | Demo sources, lake export, dbt, site classifier, runner split + layer contracts | done 2026-11-24 (5 builders, 5 reviewers; dbt 147 models/tests green on the real lake) |
+| 3 | Control panel: read-only pages, data and lineage views, live events | next |
 | 4 | Panel actions and auth, OpenLineage, LLM classifier fallback, agents page, README/demo | planned |
 
 ### 7.2 Waves and file ownership
@@ -329,4 +331,4 @@ A file has exactly one owner per wave. Builders change only files they own; anyt
 ## 9. Commands
 CLI areas: `source`, `run`/`reprocess`/`verify`/`status`, `dataset list|show|sync`, `instruction validate|apply`, `drift`, `agent`, `eval`, `schedule`/`worker` (`scrapeline --help`).
 
-`make setup` · `make up` · `make image` · `make shell` · `make sandbox-check` · `make check` · `make test` · `make test-int` · `make lint` · `make type` · `make migrate` · `make eval` · `make demo` · `scrapeline --help`
+`make setup` · `make up` · `make image` · `make shell` · `make sandbox-check` · `make check` · `make lint-imports` · `make datasets` · `make demo-history` · `make lake` · `make dbt` · `make dbt-docs` · `make test` · `make test-int` · `make lint` · `make type` · `make migrate` · `make eval` · `make demo` · `scrapeline --help`

@@ -117,7 +117,7 @@ TABLES: dict[str, LakeTable] = {
             _cols(
                 "id:BIGINT run_id:VARCHAR source_id:VARCHAR host:VARCHAR status:INTEGER "
                 "attempt:INTEGER elapsed_ms:INTEGER nbytes:INTEGER kind:VARCHAR "
-                "fetched_at:TIMESTAMPTZ error:VARCHAR"
+                "fetched_at:TIMESTAMPTZ error:VARCHAR created_at:TIMESTAMPTZ"
             ),
             ("date",),
             partition_time="fetched_at",

@@ -93,7 +93,7 @@ sources:
           - name: created_at
             data_type: TIMESTAMPTZ
       - name: fetch_log
-        description: Append table, partitioned by date; exported incrementally by `fetched_at` (overlap rule).
+        description: Append table, partitioned by date; exported incrementally by `created_at` (cutoff rule).
         config:
           external_location: read_parquet('{{ env_var('LAKE_DIR', 'data/lake') }}/fetch_log/**/*.parquet', hive_partitioning = true, union_by_name = true, filename = true)
           meta:
@@ -122,6 +122,8 @@ sources:
             data_type: TIMESTAMPTZ
           - name: error
             data_type: VARCHAR
+          - name: created_at
+            data_type: TIMESTAMPTZ
       - name: agent_runs
         description: Append table, partitioned by date; exported incrementally by `finished_at` (overlap rule).
         config:

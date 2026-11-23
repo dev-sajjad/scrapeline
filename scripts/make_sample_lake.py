@@ -129,6 +129,8 @@ class SampleLake:
                     "kind": "page",
                     "fetched_at": started + timedelta(seconds=second),
                     "error": fetch.error,
+                    # The runner writes fetch rows when the run commits, after the last fetch.
+                    "created_at": started + timedelta(seconds=len(fetches) + 1),
                 }
             )
         loaded: dict[str, dict[str, int]] = {}

@@ -476,6 +476,7 @@ class ParquetLakeExporter:
                         fetch.c.kind,
                         fetch.c.fetched_at,
                         fetch.c.error,
+                        fetch.c.created_at,
                     ),
                     fetch.c.created_at,
                     _host_only,
