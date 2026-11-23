@@ -1,0 +1,23 @@
+# A news site. news.example.org is a placeholder: point it at a site whose terms allow this.
+# Existing dataset type `article`, narrowed so the personal-data field `author` is never
+# collected; collecting it would need usage.allow_pii and a stated purpose.
+id: example-news
+name: Example news headlines
+start_urls: [https://news.example.org/latest]
+collect: >-
+  Every article on the latest-news listing: headline, link, publication time,
+  section and the short summary. Do not collect author names.
+dataset: article
+fields:
+  url: url
+  title: text
+  published_at: datetime
+  section: text
+  summary: text
+crawl: {pagination: next-link, max_pages: 5, render: auto}
+schedule: hourly
+locale: {language: en-GB, timezone: Europe/London, date_order: dmy}
+usage:
+  purpose: Track which topics a news site covers over time.
+  allow_pii: false
+  retention_days: 30

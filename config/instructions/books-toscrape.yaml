@@ -1,0 +1,27 @@
+# Books to Scrape: a public practice shop built for scraping. Existing dataset type `product`,
+# narrowed to the fields this page shows on its catalogue listing.
+# Try it: scrapeline instruction validate config/instructions/books-toscrape.yaml
+id: books-toscrape
+name: Books to Scrape catalogue
+start_urls: [https://books.toscrape.com/]
+collect: >-
+  Every book in the catalogue: title, current price, whether it is in stock,
+  star rating, cover image and the product page link. Follow the "next" link
+  through every catalogue page.
+dataset: product
+fields:
+  url: url
+  title: text
+  price: money
+  in_stock: bool
+  availability: text
+  rating: float
+  image_url: url
+crawl: {pagination: next-link, follow_detail_pages: false, max_pages: 60, render: never}
+schedule: daily
+documents: ignore
+locale: {language: en-GB, timezone: Europe/London, currency: GBP}
+usage:
+  purpose: Track how book prices and stock change over time.
+  allow_pii: false
+  retention_days: 365
