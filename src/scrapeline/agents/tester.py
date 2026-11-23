@@ -4,9 +4,11 @@ Stages: (1) static: spec schema validation, field pattern safety, AST security c
 python; (2) sandbox: parse sample pages offline (`docker run --network none ...`);
 (3) golden: compare records with human-owned expected rows. Output: machine-readable report.
 
-The sandbox reads the pages under the source's locale and receives the dataset definition,
-so user-defined dataset types work there too. Benchmark pages (drift and generation cases)
-are copies of the static-list fixture and use that source's locale.
+The sandbox reads the pages under a locale and receives the dataset definition, so
+user-defined dataset types work there too. The locale is the explicit one, else the source's
+config, else (only when the caller marks a benchmark case) the static-list fixture's, else
+strict `Locale()`, the same default a new source runs with. The report records the locale
+and where it came from, so a reviewer sees what the spec was tested under.
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ from scrapeline.registry.config import SourceConfig, load_source_file
 from scrapeline.settings import PROJECT_ROOT, Settings
 
 SandboxMode = Literal["docker", "local"]
+LocaleOrigin = Literal["explicit", "source", "benchmark", "strict default"]
 PAGE_URL_PREFIX = "/static-list/"  # drift cases keep the original URL layout
 CASE_SOURCE_ID = "fixture-static-list"  # benchmark pages are copies of this fixture site
 EXCLUDED_FIELDS = frozenset({"attendees", "contact_email", "phone", "signatures"})
@@ -93,6 +96,8 @@ class TesterReport:
     pages_parsed: int = 0
     sandbox_mode: str = "docker"
     duration_ms: int = 0
+    locale: dict[str, Any] = field(default_factory=dict)
+    locale_origin: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -108,6 +113,8 @@ class TesterReport:
             "records": self.records,
             "rejects": self.rejects,
             "pages_parsed": self.pages_parsed,
+            "locale": self.locale,
+            "locale_origin": self.locale_origin,
             "golden": {
                 k: g.get(k)
                 for k in (
@@ -228,13 +235,29 @@ def pattern_problems(pattern: str) -> list[str]:
     return problems
 
 
-def case_source(settings: Settings, source_id: str | None) -> SourceConfig | None:
-    """Config of the source under test; unknown or new sources fall back to the case source."""
-    for candidate in (source_id, CASE_SOURCE_ID):
-        path = settings.sources_dir / f"{candidate}.yaml"
-        if candidate and path.exists():
-            return load_source_file(path)
-    return None
+def source_config(settings: Settings, source_id: str | None) -> SourceConfig | None:
+    """Config of a registered source; None for a new or unknown source."""
+    if not source_id:
+        return None
+    path = settings.sources_dir / f"{source_id}.yaml"
+    return load_source_file(path) if path.exists() else None
+
+
+def resolve_locale(
+    settings: Settings,
+    source_id: str | None,
+    locale: Locale | None = None,
+    *,
+    benchmark: bool = False,
+) -> tuple[Locale, LocaleOrigin]:
+    """The locale a spec is tested under and where it came from (see the module docstring)."""
+    if locale is not None:
+        return locale, "explicit"
+    if (source := source_config(settings, source_id)) is not None:
+        return source.locale, "source"
+    if benchmark and (case := source_config(settings, CASE_SOURCE_ID)) is not None:
+        return case.locale, "benchmark"
+    return Locale(), "strict default"
 
 
 def _spec_security(
@@ -343,26 +366,26 @@ def evaluate_spec(
     source_id: str | None = None,
     locale: Locale | None = None,
     dataset: DatasetType | None = None,
+    benchmark: bool = False,
 ) -> TesterReport:
     """Golden mode when `golden_path` is given; otherwise self-consistency mode for new sites
     (records on every parsed page, all sample pages reached, no rejects/errors, unique ids,
     canonical ids not synthesized for most rows). Self-consistency is weaker evidence than
     golden rows; a human still checks sample rows in the PR.
 
-    The locale is `locale`, else the config of `source_id`, else the case source's. The
-    dataset is `dataset`, else the registry entry the spec names.
+    The locale comes from `resolve_locale` (`benchmark` marks pages copied from the
+    static-list fixture). The dataset is `dataset`, else the registry entry the spec names.
     """
     started = time.monotonic()
     report = TesterReport(passed=False, stage="static", sandbox_mode=mode)
-    source = case_source(settings, source_id)
-    report.security = _spec_security(spec_yaml, dataset, source)
+    locale, origin = resolve_locale(settings, source_id, locale, benchmark=benchmark)
+    report.locale, report.locale_origin = locale.model_dump(mode="json"), origin
+    report.security = _spec_security(spec_yaml, dataset, source_config(settings, source_id))
     if report.security:
         report.duration_ms = int((time.monotonic() - started) * 1000)
         return report
     spec = SiteSpec.from_yaml(spec_yaml, dataset=dataset)
     dataset = resolve_dataset(spec.schema_, dataset)
-    if locale is None:
-        locale = source.locale if source is not None else Locale()
     work = _prepare_workdir(spec_yaml, pages_dir, base_url, locale, dataset)
     try:
         report.stage = "sandbox"

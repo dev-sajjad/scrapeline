@@ -70,6 +70,8 @@ def test_successful_repair_first_attempt(settings: Settings) -> None:
     assert res.spec_diff_lines == 2  # one-line selector change
     assert res.cost_usd > 0 and res.tool_calls == 4
     assert "title" in driver.seen_users[0]  # diagnosis points the agent at the broken field
+    # Re-tests use the source's own locale ('03/01/2026' only passes under its mdy).
+    assert '"locale_origin": "source"' in driver.seen_users[0]
 
 
 def test_false_claim_is_caught_and_attempts_are_bounded(settings: Settings) -> None:
@@ -113,7 +115,8 @@ def test_known_fixes_pass_the_tester(
 ) -> None:
     """Every drift case is repairable by a spec-only change (the benchmark is fair)."""
     fixed = edit(spec_path_for(SOURCE).read_text())
-    assert evaluate_spec(fixed, DRIFT / case, GOLDEN, settings, mode="local").passed
+    report = evaluate_spec(fixed, DRIFT / case, GOLDEN, settings, mode="local", source_id=SOURCE)
+    assert report.passed and report.locale_origin == "source"
 
 
 def make_ws(tmp_path: Path, settings: Settings) -> Workspace:
@@ -162,7 +165,9 @@ def test_security_check_python() -> None:
 
 def test_tester_rejects_personal_data_fields(settings: Settings) -> None:
     spec = spec_path_for(SOURCE).read_text()
-    report = evaluate_spec(spec + "\n", DRIFT / "09-cosmetic-only", GOLDEN, settings, mode="local")
+    report = evaluate_spec(
+        spec + "\n", DRIFT / "09-cosmetic-only", GOLDEN, settings, mode="local", source_id=SOURCE
+    )
     assert report.passed
 
 

@@ -15,13 +15,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from scrapeline.adapters.declarative import IDENTITY_FIELDS, SiteSpec, resolve_dataset
+from scrapeline.adapters.declarative import IDENTITY_FIELD_TYPES, SiteSpec, resolve_dataset
 from scrapeline.agents.llm import ToolCall
 from scrapeline.agents.tester import (
+    LocaleOrigin,
     SandboxMode,
     TesterReport,
-    case_source,
     evaluate_spec,
+    resolve_locale,
     security_check_python,
 )
 from scrapeline.catalog.datasets import DatasetType
@@ -57,14 +58,12 @@ class Workspace:
     calls: list[ToolCall] = field(default_factory=list)
     last_report: TesterReport | None = None
     tester_runs: int = 0
-    locale: Locale | None = None  # None = the source's configured locale
+    locale: Locale | None = None  # None = resolved by the tester (source config, else strict)
     dataset: DatasetType | None = None  # None = the registry entry the spec names
+    benchmark: bool = False  # pages copied from the static-list fixture (eval cases)
 
-    def source_locale(self) -> Locale:
-        if self.locale is not None:
-            return self.locale
-        source = case_source(self.settings, self.source_id)
-        return source.locale if source is not None else Locale()
+    def source_locale(self) -> tuple[Locale, LocaleOrigin]:
+        return resolve_locale(self.settings, self.source_id, self.locale, benchmark=self.benchmark)
 
     @property
     def spec_path(self) -> Path:
@@ -127,12 +126,13 @@ def build_tool_functions(ws: Workspace) -> dict[str, Callable[..., str]]:
         """Read what this source must collect, the target schema's fields and the locale.
 
         Returns the source instruction, the allowed field names with their types, and how
-        the source writes dates, times and numbers (locale).
+        the source writes dates, times and numbers (locale, and where that locale came from).
         """
         spec = SiteSpec.from_yaml(ws.spec_path.read_text(), dataset=ws.dataset)
         dataset = resolve_dataset(spec.schema_, ws.dataset)
-        fields = {name: "text" for name in sorted(IDENTITY_FIELDS)}
+        fields: dict[str, str] = dict(sorted(IDENTITY_FIELD_TYPES.items()))
         fields |= {name: f.type for name, f in dataset.fields.items()}
+        locale, origin = ws.source_locale()
         return json.dumps(
             {
                 "source_id": ws.source_id,
@@ -141,7 +141,8 @@ def build_tool_functions(ws: Workspace) -> dict[str, Callable[..., str]]:
                 "allowed_fields": fields,
                 "required": [name for name, f in dataset.fields.items() if f.required],
                 "key_fields": list(dataset.key_fields),
-                "locale": ws.source_locale().model_dump(mode="json"),
+                "locale": locale.model_dump(mode="json"),
+                "locale_origin": origin,
             }
         )
 
@@ -210,6 +211,7 @@ def build_tool_functions(ws: Workspace) -> dict[str, Callable[..., str]]:
             source_id=ws.source_id,
             locale=ws.locale,
             dataset=ws.dataset,
+            benchmark=ws.benchmark,
         )
         ws.last_report = report
         (ws.root / f"report-{ws.tester_runs}.json").write_text(

@@ -14,6 +14,7 @@ from tests.unit.test_agents import ScriptedDriver
 
 pytestmark = pytest.mark.integration
 DRIFT = PROJECT_ROOT / "tests/sites/drift"
+SOURCE = "fixture-static-list"
 
 
 def test_exhausted_repair_marks_source_broken_and_logs_runs(clean_db: Engine) -> None:
@@ -44,11 +45,14 @@ def test_exhausted_repair_marks_source_broken_and_logs_runs(clean_db: Engine) ->
 
 def test_tester_in_docker_sandbox_matches_local() -> None:
     settings = Settings(_env_file=None)
-    spec = spec_path_for("fixture-static-list").read_text()
+    spec = spec_path_for(SOURCE).read_text()
     golden = PROJECT_ROOT / "tests/fixtures/golden/static-list.json"
     for case in ("01-title-class-renamed", "09-cosmetic-only"):
-        local = evaluate_spec(spec, DRIFT / case, golden, settings, mode="local")
-        docker = evaluate_spec(spec, DRIFT / case, golden, settings, mode="docker")
+        local, docker = (
+            evaluate_spec(spec, DRIFT / case, golden, settings, mode=mode, source_id=SOURCE)
+            for mode in ("local", "docker")
+        )
+        assert local.locale_origin == docker.locale_origin == "source"
         assert (local.passed, local.records, local.golden["field_accuracy"]) == (
             docker.passed,
             docker.records,

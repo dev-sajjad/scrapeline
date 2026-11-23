@@ -8,6 +8,7 @@ from scrapeline.adapters.declarative import spec_path_for
 from scrapeline.agents.generator import SKELETON, generate_site
 from scrapeline.agents.tester import evaluate_spec
 from scrapeline.cli.agents import draft_source_yaml
+from scrapeline.pipeline.locale import Locale
 from scrapeline.registry.config import SourceConfig
 from scrapeline.settings import Settings
 from tests.unit.test_agents import ScriptedDriver
@@ -15,7 +16,8 @@ from tests.unit.test_agents import ScriptedDriver
 ROOT = Path(__file__).resolve().parents[2]
 STATIC = ROOT / "tests/sites/static-list"
 GOLDEN = ROOT / "tests/fixtures/golden/static-list.json"
-REFERENCE = spec_path_for("fixture-static-list").read_text()
+SOURCE = "fixture-static-list"
+REFERENCE = spec_path_for(SOURCE).read_text()
 
 
 def gen(spec_text: str) -> object:
@@ -27,6 +29,7 @@ def gen(spec_text: str) -> object:
         settings=Settings(_env_file=None),
         golden_for_grading=GOLDEN,
         sandbox_mode="local",
+        benchmark=True,  # the pages are the static-list fixture's
     )
 
 
@@ -45,6 +48,32 @@ def test_plausible_but_wrong_spec_is_a_false_success() -> None:
     assert res.field_accuracy is not None and res.field_accuracy < 1.0
 
 
+def test_generator_retests_a_new_site_under_its_own_locale() -> None:
+    # The static-list pages hold '03/01/2026'; a new site without a locale must not be
+    # tested under the fixture's mdy and pass on a date the live run would reject.
+    driver = ScriptedDriver(lambda _: REFERENCE)
+    strict = generate_site(
+        "gen-test",
+        STATIC,
+        instruction="meetings",
+        driver=driver,
+        settings=Settings(_env_file=None),
+        sandbox_mode="local",
+    )
+    assert not strict.passed and strict.attempts == 3
+    assert '"locale_origin": "strict default"' in driver.seen_users[1]
+    us = generate_site(
+        "gen-test",
+        STATIC,
+        instruction="meetings",
+        driver=ScriptedDriver(lambda _: REFERENCE),
+        settings=Settings(_env_file=None),
+        sandbox_mode="local",
+        locale=Locale(language="en-US", timezone="UTC", date_order="mdy"),
+    )
+    assert us.passed and us.first_attempt_pass
+
+
 def test_skeleton_alone_never_passes() -> None:
     res = gen(SKELETON)
     assert not res.passed and res.attempts == 3
@@ -52,10 +81,11 @@ def test_skeleton_alone_never_passes() -> None:
 
 def test_self_consistency_requires_reaching_all_pages() -> None:
     no_pager = REFERENCE.replace('next_page: {css: "a[rel=next]", attr: href}\n', "")
-    report = evaluate_spec(no_pager, STATIC, None, Settings(_env_file=None), mode="local")
+    settings = Settings(_env_file=None)
+    report = evaluate_spec(no_pager, STATIC, None, settings, mode="local", source_id=SOURCE)
     assert not report.passed
     assert report.golden["checks"]["all_sample_pages_reached"] is False
-    ok = evaluate_spec(REFERENCE, STATIC, None, Settings(_env_file=None), mode="local")
+    ok = evaluate_spec(REFERENCE, STATIC, None, settings, mode="local", source_id=SOURCE)
     assert ok.passed and ok.golden["mode"] == "self_consistency"
 
 
