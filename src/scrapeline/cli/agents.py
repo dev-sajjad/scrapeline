@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import TYPE_CHECKING
+
 import typer
 
 from scrapeline.cli._common import driver as driver_for
 from scrapeline.cli._common import echo
+from scrapeline.errors import ConfigError
+
+if TYPE_CHECKING:
+    from scrapeline.registry.instruction import CompiledInstruction
 
 agent_app = typer.Typer(
-    help="AI agents (repair). Agents open branches; humans merge.", no_args_is_help=True
+    help="AI agents (repair, generate). Agents open branches; humans merge.", no_args_is_help=True
 )
 eval_app = typer.Typer(help="Agent evals over benchmark cases.", no_args_is_help=True)
 drift_app = typer.Typer(help="Drift diagnosis (deterministic).", no_args_is_help=True)
@@ -19,8 +26,6 @@ def drift_diagnose(
     source_id: str, case: str = typer.Option(..., help="Directory of new pages.")
 ) -> None:
     """Which selectors of the source's spec stop matching on the given pages."""
-    from pathlib import Path
-
     from scrapeline.adapters.declarative import SiteSpec, spec_path_for
     from scrapeline.quality.drift import diagnose
 
@@ -37,8 +42,6 @@ def agent_repair(
     local_sandbox: bool = typer.Option(False, help="Run the tester in-process (no docker)."),
 ) -> None:
     """Repair a broken declarative adapter (max 3 attempts, then source -> broken)."""
-    from pathlib import Path
-
     from scrapeline.agents.repairer import repair_case
     from scrapeline.settings import get_settings
     from scrapeline.store.db import get_engine
@@ -59,30 +62,50 @@ def agent_repair(
 
 @agent_app.command("generate")
 def agent_generate(
-    source_id: str,
+    source_id: str = typer.Argument(None, help="Source id. Default: the instruction's id."),
     pages: str = typer.Option(..., help="Directory of captured sample pages (scrapeline capture)."),
-    instruction: str = typer.Option(..., help="What to collect."),
+    instruction: Path = typer.Option(
+        None, exists=True, dir_okay=False, help="Scrape instruction YAML (docs/instructions.md)."
+    ),
+    instruction_text: str = typer.Option(
+        None, help="What to collect, as free text (instead of --instruction)."
+    ),
     driver: str = typer.Option("anthropic", help="anthropic | noop"),
     apply: bool = typer.Option(False, help="Commit spec + draft source YAML on an agent/* branch."),
-    entry: str = typer.Option(None, help="Entry URL for the draft source YAML (with --apply)."),
+    entry: str = typer.Option(
+        None, help="Entry URL for the draft source YAML (with --instruction-text and --apply)."
+    ),
     local_sandbox: bool = typer.Option(False, help="Run the tester in-process (no docker)."),
 ) -> None:
     """Generate a declarative site adapter for a new (long-tail) source from sample pages."""
-    from pathlib import Path
-
     from scrapeline.agents.generator import generate_site
     from scrapeline.settings import get_settings
     from scrapeline.store.db import get_engine
 
     source_yaml = None
-    if apply:
-        if not entry:
-            raise typer.BadParameter("--apply needs --entry")
-        source_yaml = draft_source_yaml(source_id, entry, instruction)
+    if instruction is not None:
+        if instruction_text or entry:
+            raise typer.BadParameter("use --instruction, or --instruction-text with --entry")
+        compiled = _compile_for_agent(instruction, source_id, apply)
+        source_id = compiled.source.id
+        brief = _generator_brief(compiled)
+        if apply:
+            source_yaml = agent_source_yaml(compiled)
+    else:
+        if not source_id or not instruction_text:
+            raise typer.BadParameter("give SOURCE_ID and --instruction-text, or --instruction")
+        brief = instruction_text
+        if apply:
+            if not entry:
+                raise typer.BadParameter("--apply needs --entry")
+            try:
+                source_yaml = draft_source_yaml(source_id, entry, instruction_text)
+            except ConfigError as exc:
+                raise typer.BadParameter(str(exc)) from exc
     result = generate_site(
         source_id,
         Path(pages),
-        instruction=instruction,
+        instruction=brief,
         driver=driver_for(driver),
         settings=get_settings(),
         engine=get_engine(),
@@ -95,34 +118,71 @@ def agent_generate(
         raise typer.Exit(code=1)
 
 
+def _compile_for_agent(path: Path, source_id: str | None, apply: bool) -> CompiledInstruction:
+    from scrapeline.catalog.datasets import default_registry
+    from scrapeline.registry.instruction import ScrapeInstruction, compile_instruction
+
+    try:
+        compiled = compile_instruction(
+            ScrapeInstruction.from_yaml(path.read_text()), default_registry()
+        )
+    except ConfigError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if source_id and source_id != compiled.source.id:
+        raise typer.BadParameter(
+            f"SOURCE_ID {source_id!r} differs from the instruction's id {compiled.source.id!r}"
+        )
+    # The agent branch carries the source and spec only; a new dataset type is reviewed first.
+    if apply and (compiled.dataset_is_new or compiled.needs_dataset_proposal):
+        raise typer.BadParameter(
+            f"dataset type {compiled.source.dataset_name!r} is not approved yet; run "
+            f"`scrapeline instruction apply {path}` and have it reviewed first"
+        )
+    return compiled
+
+
+def _generator_brief(compiled: CompiledInstruction) -> str:
+    """The instruction text plus the trusted dataset and field names the spec must produce."""
+    collect = compiled.source.instruction.collect if compiled.source.instruction else ""
+    if not compiled.fields:
+        return collect
+    return (
+        f"{collect}\n\nDataset type: {compiled.source.dataset_name}. "
+        f"Fields to extract: {', '.join(compiled.fields)}."
+    )
+
+
+def agent_source_yaml(compiled: CompiledInstruction) -> str:
+    """Draft source YAML for an agent branch: the adapter's author is the agent."""
+    from scrapeline.registry.instruction import render_source_yaml
+
+    return render_source_yaml(compiled.source.model_copy(update={"owner": "agent"}))
+
+
 def draft_source_yaml(source_id: str, entry: str, instruction: str) -> str:
-    """Draft source config for human completion. safe_dump: instruction text is untrusted."""
-    from urllib.parse import urlsplit
+    """Draft meeting source for the free-text flags, compiled like any instruction.
 
-    import yaml
+    Raises ConfigError when the text or URL is not a valid instruction.
+    """
+    from pydantic import ValidationError
 
-    doc = {
-        "id": source_id,
-        "name": f"{source_id} (agent-generated, draft)",
-        "platform": "custom",
-        "kind": "html",
-        "entry": entry,
-        "jurisdiction": {"id": "xx-unknown", "name": "TODO-human", "country": "US"},
-        "allowed_hosts": [urlsplit(entry).hostname or ""],
-        "cadence": "daily",
-        "politeness": {"rps": 1, "concurrency": 1, "respect_robots": True},
-        "legal": {
-            "terms_checked": "1970-01-01",
-            "notes": "TODO(human): review terms + robots.txt before activating.",
-        },
-        "schema": "Meeting",
-        "adapter": "scrapeline.adapters.declarative:DeclarativeAdapter",
-        "status": "draft",
-        "owner": "agent",
-        "config_version": 1,
-        "instruction": {"collect": instruction, "schema": "Meeting"},
-    }
-    return yaml.safe_dump(doc, sort_keys=False, allow_unicode=True)
+    from scrapeline.catalog.datasets import default_registry
+    from scrapeline.registry.instruction import ScrapeInstruction, compile_instruction
+
+    try:
+        ins = ScrapeInstruction.model_validate(
+            {
+                "id": source_id,
+                "name": f"{source_id} (agent-generated, draft)",
+                "start_urls": [entry],
+                "collect": instruction,
+                "dataset": "meeting",
+                "usage": {},
+            }
+        )
+    except ValidationError as exc:
+        raise ConfigError(f"invalid instruction: {exc}") from exc
+    return agent_source_yaml(compile_instruction(ins, default_registry()))
 
 
 @eval_app.command("run")
