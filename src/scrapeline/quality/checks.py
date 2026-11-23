@@ -2,6 +2,8 @@
 
 A 200 with zero rows is a quality failure, not success - except an incremental
 run whose watermark window legitimately contains no changes, which is a `warn`.
+Checks are about the source's dataset: only its records are counted, and null rates are
+checked only for fields it has.
 """
 
 from __future__ import annotations
@@ -13,10 +15,14 @@ from typing import Any, Literal
 import pandas as pd
 
 from scrapeline.adapters.rawdoc import Reject
-from scrapeline.pipeline.models import SCHEMAS, Record
+from scrapeline.catalog.datasets import DatasetType, default_registry
+from scrapeline.pipeline.models import Record
 from scrapeline.registry.config import QualityConfig
 
 CheckStatus = Literal["pass", "warn", "fail"]
+
+# The QualityConfig default is written for meetings; other datasets get their own.
+MEETING_NULL_RATES = QualityConfig().max_null_rate
 
 
 @dataclass(frozen=True)
@@ -28,10 +34,18 @@ class CheckResult:
     details: dict[str, Any] = field(default_factory=dict)
 
 
-def records_frame(records: Sequence[Record], schema: str) -> pd.DataFrame:
-    model = SCHEMAS[schema]
-    rows = [r.model_dump() | {"external_id": r.external_id} for r in records if type(r) is model]
-    return pd.DataFrame(rows, columns=["external_id", *model.model_fields.keys()])
+def records_frame(records: Sequence[Record], dataset: DatasetType) -> pd.DataFrame:
+    """One row per record of `dataset`; columns are the record model's fields."""
+    columns = list(dataset.record_model().model_fields)
+    rows = [r.model_dump() for r in records if r.record_type == dataset.name]
+    return pd.DataFrame(rows, columns=columns)
+
+
+def null_rate_limits(cfg: QualityConfig, dataset: DatasetType) -> dict[str, float]:
+    """Maximum null rate per field: the source's map, or the dataset's required fields at 0."""
+    if dataset.name != "meeting" and cfg.max_null_rate == MEETING_NULL_RATES:
+        return {name: 0.0 for name, f in dataset.fields.items() if f.required}
+    return dict(cfg.max_null_rate)
 
 
 def run_checks(
@@ -39,20 +53,22 @@ def run_checks(
     rejects: Sequence[Reject],
     cfg: QualityConfig,
     *,
-    schema: str = "Meeting",
+    dataset: DatasetType | str = "meeting",
     zero_is_ok: bool = False,
     duplicates_within_raw: int = 0,
 ) -> list[CheckResult]:
     """`records` should be deduplicated per identity (latest wins).
 
+    `dataset` is the source's dataset type (or its name); records and rejects of other
+    types, such as documents linked from meetings, are not counted.
     `duplicates_within_raw` counts identities emitted twice from the *same* raw document,
     which is a parser bug. The same identity across pages/runs is normal (overlap windows,
     reprocess) and is resolved by the loader, so it is not counted.
     """
-    df = records_frame(records, schema)
-    primary_type = SCHEMAS[schema].record_type
+    ds = default_registry().get(dataset) if isinstance(dataset, str) else dataset
+    df = records_frame(records, ds)
     n = len(df)
-    n_rejects = sum(1 for r in rejects if r.record_type == primary_type)
+    n_rejects = sum(1 for r in rejects if r.record_type == ds.name)
     results: list[CheckResult] = []
 
     # Record count range
@@ -73,7 +89,7 @@ def run_checks(
     )
 
     # Null rates per field
-    for column, max_rate in sorted(cfg.max_null_rate.items()):
+    for column, max_rate in sorted(null_rate_limits(cfg, ds).items()):
         if column not in df.columns:
             continue
         rate = float(df[column].isna().mean()) if n else 0.0
