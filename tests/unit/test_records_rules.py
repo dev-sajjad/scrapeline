@@ -7,11 +7,17 @@ from typing import Any
 
 import pytest
 
+from scrapeline.adapters.rawdoc import Reject
 from scrapeline.catalog.datasets import default_registry, resolve_model
 from scrapeline.errors import DatasetError
 from scrapeline.pipeline.load import Provenance
 from scrapeline.pipeline.records import keeps_personal_data, storable
-from scrapeline.pipeline.runner import _failed_fetches, is_complete_crawl, split_by_storage
+from scrapeline.pipeline.runner import (
+    _failed_fetches,
+    is_complete_crawl,
+    split_by_storage,
+    storable_reject,
+)
 from scrapeline.registry.config import UsageRights
 
 COMPLETE: dict[str, Any] = {
@@ -84,3 +90,15 @@ def test_generic_records_of_another_schema_version_are_refused_before_loading() 
     assert split_by_storage(product, [(current, prov)]) == ([(current, prov)], [])
     with pytest.raises(DatasetError, match=r"schema_version \[1, 2\], expected 1"):
         split_by_storage(product, [(current, prov), (stale, prov)])
+
+
+def test_rejects_of_the_dataset_lose_personal_data_unless_allowed() -> None:
+    article = default_registry().get("article")
+    data = {"url": "https://news.example/a", "title": None, "author": "John Private"}
+    reject = Reject(record_type="article", data=data, reason="title: missing")
+    assert storable_reject(reject, article, UsageRights()) == data | {"author": None}
+    assert reject.data["author"] == "John Private"  # the parse result itself is not changed
+    allowed = UsageRights(allow_pii=True, purpose="Research")
+    assert storable_reject(reject, article, allowed) == data
+    without_byline = Reject(record_type="article", data={"title": None}, reason="title: missing")
+    assert storable_reject(without_byline, article, UsageRights()) == {"title": None}

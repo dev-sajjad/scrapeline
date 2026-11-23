@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -24,7 +25,7 @@ from scrapeline.pipeline.models import Record
 from scrapeline.pipeline.records import PostgresRecordStore, RecordLoadStats, RecordStore
 from scrapeline.pipeline.runner import Runner
 from scrapeline.registry import load_sources
-from scrapeline.registry.config import SourceConfig
+from scrapeline.registry.config import SourceConfig, UsageRights
 from scrapeline.settings import PROJECT_ROOT, Settings
 from scrapeline.store import tables as t
 from scrapeline.store.raw import FilesystemRawStore
@@ -44,6 +45,29 @@ SHOP = SourceConfig.model_validate(
         "adapter": "tests.integration.test_records_runner:ShopAdapter",
         "politeness": {"rps": 5},
     }
+)
+
+
+NEWS = SourceConfig.model_validate(
+    {
+        "id": "news-test",
+        "name": "Test news",
+        "platform": "custom",
+        "kind": "html",
+        "entry": "https://news.example/articles",
+        "dataset": "article",
+        "legal": {"terms_checked": "2026-11-24", "notes": "Served by httpx.MockTransport."},
+        "adapter": "tests.integration.test_records_runner:NewsAdapter",
+        "politeness": {"rps": 5},
+    }
+)
+
+# The second article has no title, so it is rejected with its byline in the reject data.
+NEWS_PAGE = (
+    "<html><body>"
+    '<article data-author="Jane Example"><a href="/a/1">Budget approved</a></article>'
+    '<article data-author="John Private"><a href="/a/2"></a></article>'
+    "{more}</body></html>"
 )
 
 
@@ -80,6 +104,30 @@ class ArticleLeakAdapter(ShopAdapter):
         result = super().parse(raw)
         article = resolve_model("article")
         result.records.append(article.model_validate({"url": raw.final_url, "title": "News"}))
+        return result
+
+
+class NewsAdapter(BaseAdapter):
+    """Test-only adapter: one article per `article`, the byline in `data-author`."""
+
+    def parse(self, raw: RawDoc) -> ParseResult:
+        model = resolve_model("article")
+        result = ParseResult()
+        tree = LexborHTMLParser(raw.text)
+        for node in tree.css("article"):
+            link = node.css_first("a")
+            result.add(
+                model,
+                {
+                    "url": urljoin(raw.final_url, link.attributes.get("href") or ""),
+                    "title": link.text(strip=True) or None,
+                    "author": node.attributes.get("data-author"),
+                },
+            )
+        nxt = tree.css_first("a.next")
+        if nxt is not None:
+            next_url = urljoin(raw.final_url, nxt.attributes.get("href") or "")
+            result.next_targets.append(Target(url=next_url))
         return result
 
 
@@ -401,6 +449,39 @@ def test_a_failing_load_rolls_back_but_still_records_the_failed_run(
     assert count(clean_db, t.fetch_log, t.fetch_log.c.raw_key.is_not(None)) == 2
     rebuilt = make_runner().reprocess(SHOP.id)
     assert rebuilt.status == "succeeded" and rebuilt.loaded["product"] == loaded(inserted=5)
+
+
+@pytest.mark.parametrize(
+    ("usage", "more", "author"),
+    [
+        (UsageRights(), "", None),
+        (UsageRights(), '<a class="next" href="/gone">Next</a>', None),
+        (UsageRights(allow_pii=True, purpose="Media monitoring"), "", "John Private"),
+    ],
+    ids=["blanked", "blanked-on-a-failed-run", "kept-with-permission-and-purpose"],
+)
+def test_rejects_keep_personal_data_only_when_the_source_may(
+    make_runner: Callable[..., Runner],
+    shop: FakeShop,
+    clean_db: Engine,
+    usage: UsageRights,
+    more: str,
+    author: str | None,
+) -> None:
+    page = NEWS_PAGE.format(more=more)
+    shop.override = lambda r: httpx.Response(200, html=page) if r.url.path == "/articles" else None
+    summary = make_runner(NEWS.model_copy(update={"usage": usage}), adapter=NewsAdapter).run(
+        NEWS.id
+    )
+    # With a broken next link the run fails while crawling, and `_fail` writes the rejects.
+    assert ("HTTPStatusError" in (summary.error or "")) == bool(more)
+    with clean_db.connect() as conn:
+        rejects = list(conn.execute(select(t.rejects.c.record)).scalars())
+    assert len(rejects) == 1
+    assert rejects[0]["url"] == "https://news.example/a/2" and rejects[0]["title"] is None
+    assert rejects[0]["author"] == author
+    if author is None:
+        assert "John Private" not in json.dumps(rejects)
 
 
 def test_a_blocked_run_publishes_started_and_failed(

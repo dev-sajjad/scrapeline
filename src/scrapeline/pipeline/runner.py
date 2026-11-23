@@ -49,10 +49,10 @@ from scrapeline.pipeline.load import (
     load_records,
 )
 from scrapeline.pipeline.models import Record
-from scrapeline.pipeline.records import PostgresRecordStore, RecordStore
+from scrapeline.pipeline.records import PostgresRecordStore, RecordStore, keeps_personal_data
 from scrapeline.quality.checks import CheckResult, CheckStatus, run_checks, worst
 from scrapeline.quality.incidents import close_incidents, open_incident
-from scrapeline.registry.config import SourceConfig, load_sources
+from scrapeline.registry.config import SourceConfig, UsageRights, load_sources
 from scrapeline.settings import Settings
 from scrapeline.store import tables as t
 from scrapeline.store.raw import RawStore, ext_for
@@ -141,6 +141,18 @@ def split_by_storage(dataset: DatasetType, items: Items) -> tuple[Items, Items]:
             f"expected {dataset.version}"
         )
     return generic, typed
+
+
+def storable_reject(reject: Reject, dataset: DatasetType, usage: UsageRights) -> dict[str, Any]:
+    """A reject's data as it may be stored in pipeline.rejects.
+
+    The record store's personal-data rule applies here too: the dataset's personal-data
+    fields are blanked unless the source may keep personal data, so a reject never keeps
+    what a valid record would not.
+    """
+    if reject.record_type != dataset.name or keeps_personal_data(usage):
+        return reject.data
+    return reject.data | {name: None for name in reject.data if name in dataset.pii_fields}
 
 
 def _failed_fetches(rows: list[dict[str, Any]]) -> int:
@@ -274,7 +286,7 @@ class Runner:
                     collected.absorb(adapter.parse(raw), Provenance(row.raw_sha256, row.fetched_at))
                     summary.pages += 1
             except ScrapelineError as exc:
-                return self._fail(cfg, summary, collected, exc)
+                return self._fail(cfg, dataset, summary, collected, exc)
             return self._finish(
                 cfg,
                 dataset,
@@ -399,7 +411,7 @@ class Runner:
                 self._crawl(cfg, adapter, client, window, summary, collected, events)
             except ScrapelineError as exc:
                 self._drain_events(cfg, run_id, events, collected)
-                return self._fail(cfg, summary, collected, exc)
+                return self._fail(cfg, dataset, summary, collected, exc)
             self._drain_events(cfg, run_id, events, collected)
             return self._finish(
                 cfg,
@@ -537,7 +549,12 @@ class Runner:
         events.clear()
 
     def _write_common(
-        self, conn: Any, cfg: SourceConfig, run_id: uuid.UUID, collected: _Collected
+        self,
+        conn: Any,
+        cfg: SourceConfig,
+        dataset: DatasetType,
+        run_id: uuid.UUID,
+        collected: _Collected,
     ) -> None:
         if collected.fetch_rows:
             rows = [
@@ -561,7 +578,7 @@ class Runner:
                         "source_id": cfg.id,
                         "record_type": rej.record_type,
                         "raw_sha256": sha,
-                        "record": rej.data,
+                        "record": storable_reject(rej, dataset, cfg.usage),
                         "reason": rej.reason,
                     }
                     for rej, sha in collected.rejects
@@ -583,7 +600,7 @@ class Runner:
         try:
             generic, typed = split_by_storage(dataset, collected.items)
         except DatasetError as exc:
-            return self._fail(cfg, summary, collected, exc)
+            return self._fail(cfg, dataset, summary, collected, exc)
 
         latest = dedupe_latest(collected.items)
         records = [rec for pairs in latest.values() for rec, _ in pairs]
@@ -618,7 +635,7 @@ class Runner:
 
         try:
             with self.engine.begin() as conn:
-                self._write_common(conn, cfg, summary.run_id, collected)
+                self._write_common(conn, cfg, dataset, summary.run_id, collected)
                 started_at = conn.execute(
                     select(t.run.c.started_at).where(t.run.c.id == summary.run_id)
                 ).scalar_one()
@@ -677,7 +694,7 @@ class Runner:
             # the raw stays reachable for reprocess), the incident and the run status.
             summary.loaded, summary.removed, summary.watermark = {}, 0, None
             summary.complete = False
-            return self._fail(cfg, summary, collected, exc)
+            return self._fail(cfg, dataset, summary, collected, exc)
         log.info("run.finish", **{k: v for k, v in summary.as_dict().items() if k != "run_id"})
         self._publish_finish(dataset, summary, checks)
         return summary
@@ -711,7 +728,12 @@ class Runner:
             self._emit(summary, "run.finished", "run succeeded", self._outcome(summary))
 
     def _fail(
-        self, cfg: SourceConfig, summary: RunSummary, collected: _Collected, exc: Exception
+        self,
+        cfg: SourceConfig,
+        dataset: DatasetType,
+        summary: RunSummary,
+        collected: _Collected,
+        exc: Exception,
     ) -> RunSummary:
         summary.status = "failed"
         summary.error = f"{type(exc).__name__}: {exc}"
@@ -725,7 +747,7 @@ class Runner:
             else "error"
         )
         with self.engine.begin() as conn:
-            self._write_common(conn, cfg, summary.run_id, collected)
+            self._write_common(conn, cfg, dataset, summary.run_id, collected)
             summary.incident_id = open_incident(
                 conn,
                 source_id=cfg.id,
