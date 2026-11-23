@@ -163,15 +163,19 @@ class SourceConfig(_Strict):
         return sorted({entry_host, *(h.lower() for h in self.allowed_hosts)} - {""})
 
 
-_VAR = re.compile(r"\$\{([A-Z0-9_]+)\}")
+_VAR = re.compile(r"\$\{([A-Z0-9_]+)(?::-([^}]*))?\}")
 
 
 def _expand(text: str, env: dict[str, str]) -> str:
+    """Replace ${NAME} and ${NAME:-default}; an undefined name without a default is an error."""
+
     def repl(match: re.Match[str]) -> str:
-        name = match.group(1)
-        if name not in env:
-            raise ConfigError(f"undefined variable ${{{name}}} in source config")
-        return env[name]
+        name, default = match.group(1), match.group(2)
+        if name in env:
+            return env[name]
+        if default is not None:
+            return default
+        raise ConfigError(f"undefined variable ${{{name}}} in source config")
 
     return _VAR.sub(repl, text)
 

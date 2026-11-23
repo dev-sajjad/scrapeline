@@ -181,3 +181,13 @@ def test_lake_layout_paths_are_consistent() -> None:
             assert table.partition_time and table.watermark and table.late_commits
         else:
             assert table.path.startswith("snapshots/") and not table.partition_by
+
+
+def test_config_variables_support_defaults() -> None:
+    from scrapeline.registry.config import _expand
+
+    env = {"DAY": "2"}
+    assert _expand("day-${DAY}/", env) == "day-2/"
+    assert _expand("day-${MISSING:-1}/", env) == "day-1/"
+    with pytest.raises(ConfigError, match="MISSING"):
+        _expand("${MISSING}", env)
