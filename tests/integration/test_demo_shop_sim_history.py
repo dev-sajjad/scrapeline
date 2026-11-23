@@ -117,6 +117,7 @@ def history(engine: Engine) -> dict[str, list[Row[Any]]]:
     query = (
         select(
             r.c.external_id,
+            r.c.canonical_url,
             v.c.version,
             v.c.change_type,
             v.c.payload,
@@ -132,7 +133,7 @@ def history(engine: Engine) -> dict[str, list[Row[Any]]]:
     found: dict[str, list[Row[Any]]] = defaultdict(list)
     with engine.connect() as conn:
         for row in conn.execute(query):
-            found[slug(row.external_id)].append(row)
+            found[slug(row.canonical_url)].append(row)
     return dict(found)
 
 
@@ -173,6 +174,7 @@ def test_three_days_give_an_exact_history(
 
     # Day 2 removes the desk lamp; day 3 restores it exactly as it was.
     inserted, removed, restored = found["desk-lamp"]
+    assert inserted.external_id == "SIM-0007"  # the shop's SKU, not the host-bound URL
     assert removed.payload is None and removed.content_hash is None and removed.raw_sha256 is None
     assert (run_of[removed.run_id], run_of[restored.run_id]) == (2, 3)
     assert restored.payload == inserted.payload and restored.content_hash == inserted.content_hash
@@ -193,7 +195,7 @@ def test_three_days_give_an_exact_history(
     with clean_db.connect() as conn:
         current = conn.execute(
             select(
-                t.records.c.external_id, t.records.c.current_version, t.records.c.removed_at
+                t.records.c.canonical_url, t.records.c.current_version, t.records.c.removed_at
             ).where(t.records.c.source_id == "shop-sim")
         ).all()
         events = conn.execute(
@@ -203,7 +205,7 @@ def test_three_days_give_an_exact_history(
         rejects = conn.execute(select(func.count()).select_from(t.rejects)).scalar_one()
         incidents = conn.execute(select(func.count()).select_from(t.incident)).scalar_one()
     assert len(current) == 21 and all(row.removed_at is None for row in current)
-    assert {slug(row.external_id): row.current_version for row in current}["desk-lamp"] == 3
+    assert {slug(row.canonical_url): row.current_version for row in current}["desk-lamp"] == 3
 
     for day, summary in enumerate(days, start=1):
         mine = [e for e in events if e.run_id == summary.run_id]

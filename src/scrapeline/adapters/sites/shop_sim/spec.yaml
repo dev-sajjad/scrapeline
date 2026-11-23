@@ -4,6 +4,9 @@ spec_version: 1
 schema: product
 record: ul.products li.product
 fields:
+  # The SKU is the shop's own stable id. Product URLs carry the fixture server's host, which
+  # differs between the host shell and the worker container.
+  external_id: {attr: data-sku}
   url:      {css: a.name, attr: href}
   title:    {css: a.name}
   sku:      {attr: data-sku}

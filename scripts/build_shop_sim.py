@@ -8,8 +8,8 @@ Outputs (committed; golden files are human-owned):
 
 Day 2: five prices change (two up, three down), three products flip stock and the desk
 lamp is gone. Day 3: the desk lamp is back as it was, a bird feeder is new and the
-espresso cups change price again. Product URLs never change, so a product keeps one
-identity across days. Output is deterministic: same script, same bytes.
+espresso cups change price again. SKUs and product URLs never change, so a product keeps
+one identity across days. Output is deterministic: same script, same bytes.
 """
 
 from __future__ import annotations
@@ -147,7 +147,7 @@ def page(day: int, number: int, products: list[Product], *, last: bool) -> str:
 def golden(day: int, products: list[Product]) -> str:
     records = [
         {
-            "external_id": "{FIXTURE_BASE_URL}" + p.path,
+            "external_id": p.sku,
             "url": "{FIXTURE_BASE_URL}" + p.path,
             "title": p.title,
             "sku": p.sku,

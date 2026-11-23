@@ -76,7 +76,9 @@ def test_each_day_parses_to_its_golden_rows(day: int) -> None:
     assert report.field_accuracy == 1.0
 
 
-def test_product_urls_are_the_same_on_every_day() -> None:
+def test_identities_and_urls_are_the_same_on_every_day() -> None:
+    records = [r for day in DAYS for result in parse_day(day) for r in result.records]
+    assert all(r.external_id == r.sku and r.canonical_url == r.url for r in records)
     urls = {day: {r.url for result in parse_day(day) for r in result.records} for day in DAYS}
     assert len(urls[1]) == 20 and urls[2] == urls[1] - {f"{BASE}/shop-sim/products/desk-lamp.html"}
     assert urls[3] == urls[1] | {f"{BASE}/shop-sim/products/bird-feeder.html"}
