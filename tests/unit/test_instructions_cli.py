@@ -160,6 +160,51 @@ def test_apply_refuses_credentials_and_local_hosts(tmp_path: Path, dirs: dict[st
     assert not dirs["sources"].exists() and not dirs["sites"].exists()
 
 
+def shop(source_id: str, dataset: str) -> str:
+    """An instruction narrowed to url and title, which product and article both have."""
+    return (
+        f"id: {source_id}\nname: Shop {source_id}\nstart_urls: [https://shop.example.com/]\n"
+        f"collect: Every item with its link and title\ndataset: {dataset}\n"
+        "fields: {url: url, title: text}\nusage: {purpose: Demo}\n"
+    )
+
+
+def test_apply_refuses_a_site_dir_used_by_another_source(
+    tmp_path: Path, dirs: dict[str, Path]
+) -> None:
+    assert apply(write(tmp_path, shop("shop-a", "product"), "a.yaml"), dirs)[0] == 0
+    spec_path = dirs["sites"] / "shop_a" / "spec.yaml"
+    first_spec = spec_path.read_text()
+
+    # `shop_a` maps to the same directory as `shop-a`, whose spec would be reused silently.
+    code, out = apply(write(tmp_path, shop("shop_a", "article"), "b.yaml"), dirs)
+    assert code == 1 and "'shop-a' already uses" in out["error"]
+    assert out["spec"] == str(spec_path)
+    assert not (dirs["sources"] / "shop_a.yaml").exists()
+    assert spec_path.read_text() == first_spec
+
+    # Re-applying the owner itself is not a conflict.
+    code, out = apply(write(tmp_path, shop("shop-a", "product"), "a.yaml"), dirs, "--force")
+    assert code == 0 and out["kept"] == [str(spec_path)]
+
+
+def test_apply_refuses_a_kept_spec_for_another_dataset(
+    tmp_path: Path, dirs: dict[str, Path]
+) -> None:
+    spec_path = dirs["sites"] / "shop_b" / "spec.yaml"
+    spec_path.parent.mkdir(parents=True)
+    spec_path.write_text("schema: product\nrecord: li\nfields: {title: {css: h3}}\n")
+    code, out = apply(write(tmp_path, shop("shop-b", "article")), dirs)
+    assert code == 1 and "dataset 'product', not 'article'" in out["error"]
+    assert not dirs["sources"].exists()
+
+    # Legacy model names count as the same dataset: `Meeting` is `meeting`.
+    spec_path.write_text("schema: Meeting\nrecord: li\nfields: {title: {css: h3}}\n")
+    meeting = shop("shop-b", "meeting").replace("fields: {url: url, title: text}\n", "")
+    code, out = apply(write(tmp_path, meeting), dirs)
+    assert code == 0 and out["kept"] == [str(spec_path)]
+
+
 def test_apply_writes_a_draft_when_a_dataset_proposal_is_needed(
     tmp_path: Path, dirs: dict[str, Path]
 ) -> None:

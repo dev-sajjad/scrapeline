@@ -14,6 +14,14 @@ from scrapeline.registry.config import SourceConfig
 
 ROOT = Path(__file__).resolve().parents[2]
 BOOKS = ROOT / "config/instructions/books-toscrape.yaml"
+MEETINGS = """
+id: {id}
+name: City hall meetings
+start_urls: [https://www.example.gov/meetings]
+collect: "Every council meeting with its date, title, location and agenda link"
+dataset: meeting
+usage: {{purpose: Civic meeting archive}}
+"""
 
 
 class FakeResult:
@@ -41,8 +49,19 @@ def generate(tmp_path: Path, *args: str | Path) -> Result:
     return CliRunner().invoke(app, argv)
 
 
+def said(result: Result) -> str:
+    """The CLI output as one line: rich wraps error boxes at the terminal width."""
+    return " ".join(result.output.replace("│", " ").split())
+
+
 def source_of(call: dict[str, Any]) -> SourceConfig:
     return SourceConfig.model_validate(yaml.safe_load(call["source_yaml"]))
+
+
+def meetings(tmp_path: Path, source_id: str = "city-hall") -> Path:
+    path = tmp_path / f"{source_id}.yaml"
+    path.write_text(MEETINGS.format(id=source_id))
+    return path
 
 
 def test_instruction_file_builds_the_draft_source(
@@ -68,6 +87,17 @@ def test_instruction_file_without_apply_writes_no_source(
 ) -> None:
     assert generate(tmp_path, "books-toscrape", "--instruction", BOOKS).exit_code == 0
     assert calls[0]["source_yaml"] is None and calls[0]["apply"] is False
+
+
+def test_apply_refuses_a_site_dir_used_by_another_source(
+    tmp_path: Path, calls: list[dict[str, Any]]
+) -> None:
+    # config/sources/fixture-static-list.yaml owns adapters/sites/fixture_static_list/.
+    file = meetings(tmp_path, "fixture_static_list")
+    result = generate(tmp_path, "--instruction", file, "--apply")
+    assert result.exit_code != 0 and "'fixture-static-list' already uses" in said(result)
+    assert calls == []
+    assert generate(tmp_path, "--instruction", file).exit_code == 0  # nothing is written
 
 
 @pytest.mark.parametrize(

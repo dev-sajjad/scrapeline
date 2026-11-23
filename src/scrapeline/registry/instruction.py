@@ -207,6 +207,14 @@ def host_problem(host: str) -> str | None:
     return None
 
 
+def site_dir_name(source_id: str) -> str:
+    """Directory of a source's site adapter under adapters/sites/, as the runtime finds it."""
+    # The declarative adapter owns the id -> directory mapping; derive it, never repeat it.
+    from scrapeline.adapters.declarative import spec_path_for
+
+    return spec_path_for(source_id).parent.name
+
+
 DECLARATIVE_ADAPTER = "scrapeline.adapters.declarative:DeclarativeAdapter"
 # A date no real review has: it marks `legal.terms_checked` as "not reviewed yet".
 UNREVIEWED_TERMS = date(1970, 1, 1)
@@ -255,7 +263,7 @@ class CompiledInstruction:
     @property
     def site_dir(self) -> str:
         """Directory name of the site adapter under adapters/sites/."""
-        return self.source.id.replace("-", "_")
+        return site_dir_name(self.source.id)
 
     @property
     def personal_data_fields(self) -> tuple[str, ...]:
@@ -502,7 +510,7 @@ def _next_steps(
 ) -> list[str]:
     sid = source.id
     name = source.dataset_name
-    spec = f"adapters/sites/{sid.replace('-', '_')}/spec.yaml"
+    spec = f"adapters/sites/{site_dir_name(sid)}/spec.yaml"
     # A browser-rendered source captured without --render saves the empty JS shell.
     capture = f"scrapeline capture {sid}" + (" --render" if source.kind == "js" else "")
     steps: list[str] = []

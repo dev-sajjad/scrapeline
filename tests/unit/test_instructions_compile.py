@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 import yaml
 
+from scrapeline.adapters.declarative import spec_path_for
 from scrapeline.catalog.datasets import DatasetRegistry, DatasetType, load_dataset_file
 from scrapeline.errors import ConfigError
 from scrapeline.registry.config import SourceConfig
@@ -18,6 +19,7 @@ from scrapeline.registry.instruction import (
     ScrapeInstruction,
     compile_instruction,
     host_problem,
+    site_dir_name,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -361,6 +363,12 @@ def test_js_sources_are_captured_rendered() -> None:
     html = compile_yaml("dataset: product\n")
     steps = " ".join(html.next_steps)
     assert "scrapeline capture books-catalogue" in steps and "--render" not in steps
+
+
+def test_site_dir_follows_the_runtime_spec_path() -> None:
+    compiled = compile_yaml("id: shop-a\ndataset: product\n")
+    assert compiled.site_dir == site_dir_name("shop-a") == spec_path_for("shop-a").parent.name
+    assert any("adapters/sites/shop_a/spec.yaml" in s for s in compiled.next_steps)
 
 
 @pytest.mark.parametrize("path", sorted((ROOT / "config/instructions").glob("*.yaml")))

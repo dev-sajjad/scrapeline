@@ -86,6 +86,8 @@ Some fields are marked as personal data (`pii`), such as `article.author`. Colle
 
 `apply` refuses to overwrite an existing source or dataset file unless you pass `--force`. It never replaces an existing `spec.yaml`, which may already hold real selectors; delete it yourself if you want a fresh skeleton. `--sources-dir`, `--datasets-dir` and `--sites-dir` write somewhere else (useful for trying things out).
 
+Because `-` becomes `_`, ids such as `shop-a` and `shop_a` share one adapter directory. `apply` writes nothing (even with `--force`) when another source config already uses that directory, or when the existing `spec.yaml` is for a different dataset type: the new source would otherwise run on someone else's selectors. Choose another id, or fix or delete that spec.
+
 ## From draft to active
 
 `validate` and `apply` print these steps for the instruction at hand:

@@ -119,13 +119,15 @@ def agent_generate(
 
 
 def _compile_for_agent(path: Path, source_id: str | None, apply: bool) -> CompiledInstruction:
+    from scrapeline.adapters.declarative import spec_path_for
     from scrapeline.catalog.datasets import default_registry
+    from scrapeline.cli.instructions import site_dir_conflict
     from scrapeline.registry.instruction import ScrapeInstruction, compile_instruction
+    from scrapeline.settings import get_settings
 
+    registry = default_registry()
     try:
-        compiled = compile_instruction(
-            ScrapeInstruction.from_yaml(path.read_text()), default_registry()
-        )
+        compiled = compile_instruction(ScrapeInstruction.from_yaml(path.read_text()), registry)
     except ConfigError as exc:
         raise typer.BadParameter(str(exc)) from exc
     if source_id and source_id != compiled.source.id:
@@ -138,6 +140,11 @@ def _compile_for_agent(path: Path, source_id: str | None, apply: bool) -> Compil
             f"dataset type {compiled.source.dataset_name!r} is not approved yet; run "
             f"`scrapeline instruction apply {path}` and have it reviewed first"
         )
+    if apply:
+        spec = spec_path_for(compiled.source.id)
+        conflict = site_dir_conflict(compiled, get_settings().sources_dir, spec, registry)
+        if conflict:
+            raise typer.BadParameter(conflict)
     return compiled
 
 
