@@ -9,6 +9,7 @@ from scrapeline.adapters.declarative import SiteSpec, parse_html, spec_path_for
 from scrapeline.adapters.rawdoc import RawDoc
 from scrapeline.errors import ConfigError, ParseError
 from scrapeline.pipeline.documents import extract_pdf
+from scrapeline.pipeline.locale import Locale
 from scrapeline.pipeline.models import Meeting
 from scrapeline.quality.golden import compare, load_golden
 
@@ -16,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SITES = ROOT / "tests" / "sites"
 GOLDEN = ROOT / "tests" / "fixtures" / "golden"
 BASE = "http://localhost:8080"
+FIXTURE_LOCALE = Locale(language="en-US", timezone="UTC", date_order="mdy")
 
 
 def raw_page(site: str, name: str) -> RawDoc:
@@ -42,7 +44,7 @@ def test_static_list_spec_matches_golden_across_pages(static_spec: SiteSpec) -> 
     records, pages = [], 0
     name = "index.html"
     while name:
-        result = parse_html(static_spec, raw_page("static-list", name))
+        result = parse_html(static_spec, raw_page("static-list", name), locale=FIXTURE_LOCALE)
         records += [r for r in result.records if isinstance(r, Meeting)]
         pages += 1
         name = result.next_targets[0].url.rsplit("/", 1)[1] if result.next_targets else ""
@@ -55,14 +57,16 @@ def test_static_list_spec_matches_golden_across_pages(static_spec: SiteSpec) -> 
 def test_record_selector_matching_nothing_is_a_parse_error(static_spec: SiteSpec) -> None:
     broken = static_spec.model_copy(update={"record": "table.renamed tbody tr"})
     with pytest.raises(ParseError, match="matched 0"):
-        parse_html(broken, raw_page("static-list", "index.html"))
+        parse_html(broken, raw_page("static-list", "index.html"), locale=FIXTURE_LOCALE)
 
 
 def test_missing_required_field_becomes_reject(static_spec: SiteSpec) -> None:
     fields = dict(static_spec.fields)
     fields["meeting_date"] = fields["meeting_date"].model_copy(update={"css": "td.when"})
     result = parse_html(
-        static_spec.model_copy(update={"fields": fields}), raw_page("static-list", "index.html")
+        static_spec.model_copy(update={"fields": fields}),
+        raw_page("static-list", "index.html"),
+        locale=FIXTURE_LOCALE,
     )
     assert not [r for r in result.records if isinstance(r, Meeting)]
     assert len(result.rejects) == 10
