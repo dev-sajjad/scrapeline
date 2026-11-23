@@ -1,0 +1,90 @@
+[importlinter]
+root_package = scrapeline
+# External packages are needed for the network and LLM boundary contracts below.
+include_external_packages = True
+# Imports under `if TYPE_CHECKING:` are annotations only; they never run.
+exclude_type_checking_imports = True
+
+[importlinter:contract:layers]
+name = Interface above application above domain
+type = layers
+# cli and serve are separate front ends: both go through the application, never each other.
+layers =
+    scrapeline.cli | scrapeline.serve
+    scrapeline.pipeline.runner : scrapeline.pipeline.crawl : scrapeline.pipeline.ingest : scrapeline.pipeline.finalise : scrapeline.ops.worker : scrapeline.quality : scrapeline.agents : scrapeline.evals : scrapeline.analytics
+    scrapeline.pipeline.models : scrapeline.pipeline.values : scrapeline.pipeline.locale : scrapeline.pipeline.normalise : scrapeline.pipeline.identity : scrapeline.catalog.datasets : scrapeline.catalog.sites : scrapeline.adapters.rawdoc : scrapeline.adapters.declarative : scrapeline.registry
+
+[importlinter:contract:pure-domain]
+name = Domain code does no I/O and needs no settings
+type = forbidden
+# The domain also runs in the offline sandbox, where there is no network, database or .env.
+source_modules =
+    scrapeline.pipeline.models
+    scrapeline.pipeline.values
+    scrapeline.pipeline.locale
+    scrapeline.pipeline.normalise
+    scrapeline.pipeline.identity
+    scrapeline.catalog.datasets
+    scrapeline.catalog.sites
+    scrapeline.adapters.rawdoc
+    scrapeline.adapters.declarative
+    scrapeline.registry
+forbidden_modules =
+    scrapeline.fetch
+    scrapeline.store
+    scrapeline.settings
+ignore_imports =
+    # default_registry() imports settings lazily for the user dataset directory, and falls
+    # back to the built-in types when settings cannot be imported (the offline sandbox).
+    scrapeline.catalog.datasets -> scrapeline.settings
+    # load_source_file() imports settings lazily to expand ${FIXTURE_BASE_URL}; validating a
+    # parsed config never touches it.
+    scrapeline.registry.config -> scrapeline.settings
+
+[importlinter:contract:deterministic-core]
+name = Scraping, ETL, checks and ops never depend on the agents
+type = forbidden
+source_modules =
+    scrapeline.adapters
+    scrapeline.analytics
+    scrapeline.catalog
+    scrapeline.fetch
+    scrapeline.ops
+    scrapeline.pipeline
+    scrapeline.quality
+    scrapeline.registry
+    scrapeline.store
+forbidden_modules =
+    scrapeline.agents
+    scrapeline.evals
+
+[importlinter:contract:llm-boundary]
+name = Only the agents use the LLM wrapper
+type = protected
+protected_modules =
+    scrapeline.agents.llm
+allowed_importers =
+    scrapeline.agents
+ignore_imports =
+    # The CLI is the composition root: driver() builds the driver --driver names and hands
+    # it to the agents and the eval engine.
+    scrapeline.cli._common -> scrapeline.agents.llm
+    # The eval engine runs whichever driver it is given; it imports only the AgentDriver type.
+    scrapeline.evals.runner -> scrapeline.agents.llm
+
+[importlinter:contract:anthropic-sdk]
+name = Only the agents import the Anthropic SDK
+type = protected
+protected_modules =
+    anthropic
+allowed_importers =
+    scrapeline.agents
+
+[importlinter:contract:network]
+name = Only fetch opens network connections
+type = protected
+protected_modules =
+    httpx
+    playwright
+allowed_importers =
+    scrapeline.fetch
