@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -11,12 +11,17 @@ from urllib.parse import urljoin
 import httpx
 import pytest
 from selectolax.lexbor import LexborHTMLParser
-from sqlalchemy import Engine, func, select
+from sqlalchemy import Connection, Engine, func, select
+from sqlalchemy.exc import IntegrityError
 
 from scrapeline.adapters.base import BaseAdapter
 from scrapeline.adapters.rawdoc import ParseResult, RawDoc, Target
-from scrapeline.catalog.datasets import resolve_model
+from scrapeline.catalog.datasets import DatasetType, default_registry, resolve_model
+from scrapeline.errors import DatasetError
 from scrapeline.ops.events import Event
+from scrapeline.pipeline.load import LoadContext, Provenance
+from scrapeline.pipeline.models import Record
+from scrapeline.pipeline.records import PostgresRecordStore, RecordLoadStats, RecordStore
 from scrapeline.pipeline.runner import Runner
 from scrapeline.registry import load_sources
 from scrapeline.registry.config import SourceConfig
@@ -76,6 +81,34 @@ class ArticleLeakAdapter(ShopAdapter):
         article = resolve_model("article")
         result.records.append(article.model_validate({"url": raw.final_url, "title": "News"}))
         return result
+
+
+class StaleProductAdapter(ShopAdapter):
+    """Emits product records of a schema version the registry does not have."""
+
+    def parse(self, raw: RawDoc) -> ParseResult:
+        result = super().parse(raw)
+        stale = default_registry().get("product").model_copy(update={"version": 99})
+        model = stale.record_model()
+        result.records = [model.model_validate(r.model_dump(mode="json")) for r in result.records]
+        return result
+
+
+class ExplodingStore(PostgresRecordStore):
+    """Writes like the real store, then fails, so the whole load must roll back."""
+
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    def load(
+        self,
+        conn: Connection,
+        ctx: LoadContext,
+        dataset: DatasetType,
+        items: Iterable[tuple[Record, Provenance]],
+    ) -> RecordLoadStats:
+        super().load(conn, ctx, dataset, items)
+        raise self.error
 
 
 class FakeShop:
@@ -138,7 +171,11 @@ def shop() -> FakeShop:
 @pytest.fixture
 def make_runner(clean_db: Engine, tmp_path: Path, shop: FakeShop) -> Callable[..., Runner]:
     def make(
-        cfg: SourceConfig = SHOP, *, bus: Any = None, adapter: type[ShopAdapter] = ShopAdapter
+        cfg: SourceConfig = SHOP,
+        *,
+        bus: Any = None,
+        adapter: type[BaseAdapter] = ShopAdapter,
+        store: RecordStore | None = None,
     ) -> Runner:
         return Runner(
             Settings(_env_file=None, raw_store_dir=tmp_path / "raw"),
@@ -150,6 +187,7 @@ def make_runner(clean_db: Engine, tmp_path: Path, shop: FakeShop) -> Callable[..
             sources={cfg.id: cfg},
             adapter_factory=adapter,
             event_bus=bus,
+            record_store=store,
         )
 
     return make
@@ -178,6 +216,11 @@ def count(engine: Engine, table: t.Table, *where: Any) -> int:
 
 def loaded(**changes: int) -> dict[str, int]:
     return {"inserted": 0, "updated": 0, "unchanged": 0, "restored": 0, "removed": 0} | changes
+
+
+def run_status(engine: Engine) -> list[str]:
+    with engine.connect() as conn:
+        return list(conn.execute(select(t.run.c.status).order_by(t.run.c.started_at)).scalars())
 
 
 def test_generic_run_stores_records_with_history_and_events(
@@ -320,6 +363,44 @@ def test_records_outside_the_sources_dataset_fail_the_run(
     assert count(clean_db, t.incident, t.incident.c.kind == "error") == 1
     assert bus.kinds() == ["run.started", "run.failed"]
     assert bus.events[-1].level == "error"
+
+
+def test_records_of_another_schema_version_fail_the_run_before_loading(
+    make_runner: Callable[..., Runner], clean_db: Engine
+) -> None:
+    bus = RecordingBus()
+    summary = make_runner(bus=bus, adapter=StaleProductAdapter).run(SHOP.id)
+    assert summary.status == "failed" and "schema_version [99], expected 1" in (summary.error or "")
+    assert run_status(clean_db) == ["failed"]
+    assert count(clean_db, t.records) == 0
+    assert count(clean_db, t.fetch_log, t.fetch_log.c.raw_key.is_not(None)) == 2
+    assert count(clean_db, t.incident, t.incident.c.kind == "error") == 1
+    assert bus.kinds() == ["run.started", "run.failed"]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        DatasetError("store refused the records"),
+        IntegrityError("INSERT INTO data.record_versions", {}, Exception("duplicate key")),
+    ],
+    ids=["dataset-error", "integrity-error"],
+)
+def test_a_failing_load_rolls_back_but_still_records_the_failed_run(
+    make_runner: Callable[..., Runner], clean_db: Engine, error: Exception
+) -> None:
+    bus = RecordingBus()
+    summary = make_runner(bus=bus, store=ExplodingStore(error)).run(SHOP.id)
+    assert summary.status == "failed" and type(error).__name__ in (summary.error or "")
+    assert summary.loaded == {} and not summary.complete and summary.watermark is None
+    assert run_status(clean_db) == ["failed"]
+    assert count(clean_db, t.records) == 0 and count(clean_db, t.check_result) == 0
+    assert count(clean_db, t.incident, t.incident.c.kind == "error") == 1
+    assert bus.kinds() == ["run.started", "run.failed"]
+    # The fetch log survives the rollback, so the raw files can still be rebuilt from.
+    assert count(clean_db, t.fetch_log, t.fetch_log.c.raw_key.is_not(None)) == 2
+    rebuilt = make_runner().reprocess(SHOP.id)
+    assert rebuilt.status == "succeeded" and rebuilt.loaded["product"] == loaded(inserted=5)
 
 
 def test_a_blocked_run_publishes_started_and_failed(

@@ -18,6 +18,7 @@ from typing import Any, Literal
 
 import httpx
 from sqlalchemy import Connection, Engine, select
+from sqlalchemy.exc import IntegrityError
 
 from scrapeline.adapters.base import Adapter, Window, adapter_code_hash, load_adapter
 from scrapeline.adapters.rawdoc import ParseResult, RawDoc, Reject, Target
@@ -114,15 +115,18 @@ Items = list[tuple[Record, Provenance]]
 def split_by_storage(dataset: DatasetType, items: Items) -> tuple[Items, Items]:
     """(records for the generic record store, records for typed tables).
 
-    A record type that is neither the source's generic dataset nor a typed table is a parser
-    bug, and raises DatasetError rather than being dropped.
+    A record type that is neither the source's generic dataset nor a typed table, or a
+    generic record of another schema version, is a parser bug. Both raise DatasetError here,
+    before the load transaction starts, rather than being dropped or half-loaded.
     """
     generic: Items = []
     typed: Items = []
     unknown: set[str] = set()
+    versions: set[int] = set()
     for rec, prov in items:
         if dataset.storage == "generic" and rec.record_type == dataset.name:
             generic.append((rec, prov))
+            versions.add(rec.schema_version)
         elif rec.record_type in TABLE_FOR:
             typed.append((rec, prov))
         else:
@@ -130,6 +134,11 @@ def split_by_storage(dataset: DatasetType, items: Items) -> tuple[Items, Items]:
     if unknown:
         raise DatasetError(
             f"parser produced {sorted(unknown)} records; the source's dataset is {dataset.name}"
+        )
+    if versions - {dataset.version}:
+        raise DatasetError(
+            f"{dataset.name} records have schema_version {sorted(versions)}, "
+            f"expected {dataset.version}"
         )
     return generic, typed
 
@@ -607,61 +616,68 @@ class Runner:
             verdict=verdict,
         )
 
-        with self.engine.begin() as conn:
-            self._write_common(conn, cfg, summary.run_id, collected)
-            started_at = conn.execute(
-                select(t.run.c.started_at).where(t.run.c.id == summary.run_id)
-            ).scalar_one()
-            ctx = LoadContext(
-                cfg.id,
-                cfg.jurisdiction.id if cfg.jurisdiction else None,
-                summary.run_id,
-                version_id,
-                run_started_at=started_at,
-                usage=cfg.usage,
-            )
-            loaded = {k: v.as_dict() for k, v in load_records(conn, ctx, typed).items()}
-            if dataset.storage == "generic":
-                stats = self.record_store.load(conn, ctx, dataset, generic)
-                if summary.complete:
-                    seen = {rec.external_id for rec, _ in generic}
-                    stats.removed = self.record_store.mark_removed(conn, ctx, dataset, seen)
-                loaded[dataset.name] = stats.as_dict()
-                summary.removed = stats.removed
-            summary.loaded = loaded
-            conn.execute(
-                t.check_result.insert(),
-                [
-                    {
-                        "run_id": summary.run_id,
-                        "source_id": cfg.id,
-                        "check_name": c.name,
-                        "status": c.status,
-                        "value": c.value,
-                        "threshold": c.threshold,
-                        "details": c.details,
-                    }
-                    for c in checks
-                ],
-            )
-            if verdict == "fail":
-                summary.incident_id = open_incident(
-                    conn,
-                    source_id=cfg.id,
-                    kind="quality",
-                    run_id=summary.run_id,
-                    summary=f"quality checks failed: {', '.join(failed)}",
-                    details={"checks": summary.checks},
+        try:
+            with self.engine.begin() as conn:
+                self._write_common(conn, cfg, summary.run_id, collected)
+                started_at = conn.execute(
+                    select(t.run.c.started_at).where(t.run.c.id == summary.run_id)
+                ).scalar_one()
+                ctx = LoadContext(
+                    cfg.id,
+                    cfg.jurisdiction.id if cfg.jurisdiction else None,
+                    summary.run_id,
+                    version_id,
+                    run_started_at=started_at,
+                    usage=cfg.usage,
                 )
-            else:
-                close_incidents(conn, source_id=cfg.id, kind="quality", note="checks passing")
-                close_incidents(conn, source_id=cfg.id, kind="blocked", note="fetch succeeded")
-                if advance_watermark and collected.watermark is not None:
-                    runs.advance_watermark(conn, cfg.id, collected.watermark)
-                    summary.watermark = collected.watermark.isoformat()
-            runs.finish_run(
-                conn, summary.run_id, status=summary.status, stats=summary.as_dict(), error=None
-            )
+                loaded = {k: v.as_dict() for k, v in load_records(conn, ctx, typed).items()}
+                if dataset.storage == "generic":
+                    stats = self.record_store.load(conn, ctx, dataset, generic)
+                    if summary.complete:
+                        seen = {rec.external_id for rec, _ in generic}
+                        stats.removed = self.record_store.mark_removed(conn, ctx, dataset, seen)
+                    loaded[dataset.name] = stats.as_dict()
+                    summary.removed = stats.removed
+                summary.loaded = loaded
+                conn.execute(
+                    t.check_result.insert(),
+                    [
+                        {
+                            "run_id": summary.run_id,
+                            "source_id": cfg.id,
+                            "check_name": c.name,
+                            "status": c.status,
+                            "value": c.value,
+                            "threshold": c.threshold,
+                            "details": c.details,
+                        }
+                        for c in checks
+                    ],
+                )
+                if verdict == "fail":
+                    summary.incident_id = open_incident(
+                        conn,
+                        source_id=cfg.id,
+                        kind="quality",
+                        run_id=summary.run_id,
+                        summary=f"quality checks failed: {', '.join(failed)}",
+                        details={"checks": summary.checks},
+                    )
+                else:
+                    close_incidents(conn, source_id=cfg.id, kind="quality", note="checks passing")
+                    close_incidents(conn, source_id=cfg.id, kind="blocked", note="fetch succeeded")
+                    if advance_watermark and collected.watermark is not None:
+                        runs.advance_watermark(conn, cfg.id, collected.watermark)
+                        summary.watermark = collected.watermark.isoformat()
+                runs.finish_run(
+                    conn, summary.run_id, status=summary.status, stats=summary.as_dict(), error=None
+                )
+        except (ScrapelineError, IntegrityError) as exc:
+            # The load rolled back; failing through `_fail` still records the fetch log (so
+            # the raw stays reachable for reprocess), the incident and the run status.
+            summary.loaded, summary.removed, summary.watermark = {}, 0, None
+            summary.complete = False
+            return self._fail(cfg, summary, collected, exc)
         log.info("run.finish", **{k: v for k, v in summary.as_dict().items() if k != "run_id"})
         self._publish_finish(dataset, summary, checks)
         return summary

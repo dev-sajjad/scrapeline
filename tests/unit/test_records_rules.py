@@ -1,14 +1,17 @@
-"""Pure rules behind the record store: crawl completeness and personal data."""
+"""Pure rules behind the record store: crawl completeness, routing and personal data."""
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 
 from scrapeline.catalog.datasets import default_registry, resolve_model
+from scrapeline.errors import DatasetError
+from scrapeline.pipeline.load import Provenance
 from scrapeline.pipeline.records import keeps_personal_data, storable
-from scrapeline.pipeline.runner import _failed_fetches, is_complete_crawl
+from scrapeline.pipeline.runner import _failed_fetches, is_complete_crawl, split_by_storage
 from scrapeline.registry.config import UsageRights
 
 COMPLETE: dict[str, Any] = {
@@ -70,3 +73,14 @@ def test_personal_data_needs_permission_and_a_purpose() -> None:
     assert storable(article, dataset, UsageRights()).author is None  # type: ignore[attr-defined]
     allowed = UsageRights(allow_pii=True, purpose="Research")
     assert storable(article, dataset, allowed) is article
+
+
+def test_generic_records_of_another_schema_version_are_refused_before_loading() -> None:
+    product = default_registry().get("product")
+    prov = Provenance("0" * 64, datetime.now(UTC))
+    current = product.record_model().model_validate({"url": "https://s.example/1", "title": "A"})
+    stale_model = product.model_copy(update={"version": 2}).record_model()
+    stale = stale_model.model_validate({"url": "https://s.example/2", "title": "B"})
+    assert split_by_storage(product, [(current, prov)]) == ([(current, prov)], [])
+    with pytest.raises(DatasetError, match=r"schema_version \[1, 2\], expected 1"):
+        split_by_storage(product, [(current, prov), (stale, prov)])
