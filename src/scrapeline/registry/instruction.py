@@ -503,10 +503,12 @@ def _next_steps(
     sid = source.id
     name = source.dataset_name
     spec = f"adapters/sites/{sid.replace('-', '_')}/spec.yaml"
+    # A browser-rendered source captured without --render saves the empty JS shell.
+    capture = f"scrapeline capture {sid}" + (" --render" if source.kind == "js" else "")
     steps: list[str] = []
     if dataset is None:
         steps += [
-            f"Capture sample pages: scrapeline capture {sid}.",
+            f"Capture sample pages: {capture}.",
             f"A dataset type must be proposed: define '{name}' in config/datasets/{name}.yaml "
             "(by hand or from the generator agent's proposal) and have a human approve it.",
             f"Then add `dataset: {name}` and its `fields` to the instruction and apply it "
@@ -524,7 +526,7 @@ def _next_steps(
         )
     steps.append(
         f"Fill the TODO selectors in {spec} by hand, or capture sample pages "
-        f"(scrapeline capture {sid}) and run the generator agent: scrapeline agent generate "
+        f"({capture}) and run the generator agent: scrapeline agent generate "
         f"--instruction <instruction file> --pages data/samples/{sid}."
     )
     if ins.crawl.pagination == "auto":

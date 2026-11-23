@@ -354,6 +354,15 @@ def test_public_host_names_pass_the_static_checks() -> None:
     assert hosts == ["books.toscrape.com", "files.example.org", "img.example.com"]
 
 
+def test_js_sources_are_captured_rendered() -> None:
+    js = compile_yaml("dataset: product\ncrawl: {render: always}\n")
+    assert js.source.kind == "js"
+    assert any("scrapeline capture books-catalogue --render" in s for s in js.next_steps)
+    html = compile_yaml("dataset: product\n")
+    steps = " ".join(html.next_steps)
+    assert "scrapeline capture books-catalogue" in steps and "--render" not in steps
+
+
 @pytest.mark.parametrize("path", sorted((ROOT / "config/instructions").glob("*.yaml")))
 def test_example_instructions_compile(path: Path) -> None:
     compiled = compile_instruction(ScrapeInstruction.from_yaml(path.read_text()), REGISTRY)

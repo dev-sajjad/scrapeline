@@ -91,9 +91,9 @@ Some fields are marked as personal data (`pii`), such as `article.author`. Colle
 `validate` and `apply` print these steps for the instruction at hand:
 
 1. **Approve the dataset type** if it is new (or propose one if none was given): check field types, key fields and personal-data flags.
-2. **Complete the adapter**: fill the `TODO` selectors in `spec.yaml` by hand, or capture sample pages and run the generator agent:
+2. **Complete the adapter**: fill the `TODO` selectors in `spec.yaml` by hand, or capture sample pages and run the generator agent. Add `--render` when the instruction has `crawl.render: always`; without it the samples hold the page before JavaScript has filled in the records.
    ```sh
-   scrapeline capture <id>
+   scrapeline capture <id>            # or: scrapeline capture <id> --render
    scrapeline agent generate --instruction my-instruction.yaml --pages data/samples/<id>
    ```
    The agent works offline on the captured pages and the deterministic tester checks its spec. With `--apply`, a passing spec and the draft source are committed on an `agent/*` branch for a human to review and merge (a new dataset type must be applied and approved first).
