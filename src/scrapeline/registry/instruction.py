@@ -258,6 +258,8 @@ def compile_instruction(ins: ScrapeInstruction, registry: DatasetRegistry) -> Co
         wanted = _wanted_fields(ins, dataset)
         excluded = [name for name in dataset.fields if name not in wanted]
     typed = dataset is not None and dataset.storage == "typed"
+    # The legacy `schema` key keeps naming the hand-written model of a typed dataset.
+    schema = dataset.record_model().__name__ if dataset is not None and typed else dataset_name
     pagination = _PAGINATION[ins.crawl.pagination]
     options: dict[str, Any] = {}
     if len(ins.start_urls) > 1:
@@ -273,8 +275,7 @@ def compile_instruction(ins: ScrapeInstruction, registry: DatasetRegistry) -> Co
         "allowed_hosts": ins.hosts,
         "cadence": ins.schedule,
         "legal": {"terms_checked": UNREVIEWED_TERMS, "notes": _legal_note(ins)},
-        # The legacy `schema` key keeps naming the hand-written model for typed datasets.
-        "schema": dataset.record_model().__name__ if typed and dataset else dataset_name,
+        "schema": schema,
         "dataset": dataset_name,
         "locale": ins.locale,
         "usage": ins.usage,
