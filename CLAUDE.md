@@ -267,7 +267,7 @@ Flow: instruction → validate (URL policy, robots, usage) → worker captures s
 
 ## 7. Build plan
 
-**v1 (done, on `main`):** Docker base, Legistar platform adapter on 3 real cities, raw store, idempotent typed loads, Playwright and documents, anti-bot detection, quality checks, drift diagnosis, offline sandbox, repair and generator agents with evals, job queue and worker, read API, demo. Open from v1: paid eval run to fill `docs/evals.md`; ≥2 accepted and ≥2 rejected agent PRs in the review log; schema-bump compatibility test; `api-cursor` fixture; S3 raw backend.
+**v1 (done, on `main`):** Docker base, Legistar platform adapter on 3 real cities, raw store, idempotent typed loads, Playwright and documents, anti-bot detection, quality checks, drift diagnosis, offline sandbox, repair and generator agents with evals, job queue and worker, read API, demo. Open from v1: paid eval run to fill `docs/evals.md`; ≥2 accepted and ≥2 rejected agent PRs in the review log; schema-bump compatibility test; `api-cursor` fixture and `fetch/pagination.py` strategies; S3 raw backend.
 
 **v2 (in progress): any-domain data platform with analytics and a control panel.** Flagship analytics question: *how do prices and stock change over time?* plus a scraper-health mart.
 
@@ -294,7 +294,7 @@ A file has exactly one owner per wave. Builders change only files they own; anyt
 | 2 | E lake export | Parquet exporter per `analytics/layout.py`; incremental state; personal-data filter; `lake export` CLI | `analytics/export.py`, `cli/analytics.py`, tests |
 | 2 | F dbt | dbt-duckdb project; staging models generated from the registry; dims; marts `price_history`, `scraper_health_daily`; dbt tests and docs | `dbt/`, `scripts/gen_dbt_staging.py` |
 | 2 | G classifier | Site classifier: domain rules, page evidence, platform fingerprints; audit log; `site classify/override` CLI | `catalog/classify.py`, `cli/sites.py`, tests |
-| 2 | H structure | Split `runner.py` into crawl / ingest / finalise; `fetch/pagination.py`; `import-linter` layer contracts in CI | `pipeline/runner*.py`, `fetch/pagination.py`, `.importlinter`, CI workflow |
+| 2 | H structure | Split `runner.py` into crawl / ingest / finalise (no behaviour change); `import-linter` layer contracts; CI jobs for layer contracts, lake export and `dbt build` | `pipeline/runner.py` + new `pipeline/crawl.py`, `ingest.py`, `finalise.py`, `.importlinter`, `.github/workflows/ci.yml` |
 | 3 | I panel shell | Panel app, layout, health, sources, sites, runs pages; `panel` compose service | `serve/panel/` (shell, those pages) |
 | 3 | J data views | Data explorer, record lineage (record → version → raw file), storage browser, marts view | `serve/panel/` (those pages) |
 | 3 | K live | `LISTEN` → SSE stream, live run log | `serve/panel/live.py`, `ops/events.py` (listener side) |
