@@ -3,8 +3,11 @@
 Contract: reads /work/input.json (+ page files next to it), parses offline, writes ONE JSON
 report to stdout. Imports only pure modules: no fetch/, store/, settings, DB or network code.
 
-input.json: {"spec_yaml": str, "base_url": str, "pages": [{"file": str, "url": str}], "max_pages": int}
-Pagination is followed offline: a next-page URL is mapped to the page file with the same name.
+input.json: {"spec_yaml": str, "base_url": str, "pages": [{"file": str, "url": str}],
+             "max_pages": int, "locale": {...}, "dataset": {...} (optional)}
+`locale` is the source's Locale; `dataset` is the dataset type definition, needed for types
+the built-in registry does not hold. Pagination is followed offline: a next-page URL is
+mapped to the page file with the same name.
 """
 
 from __future__ import annotations
@@ -19,15 +22,26 @@ from typing import Any
 
 
 def run(work: Path) -> dict[str, Any]:
+    from pydantic import ValidationError
+
     from scrapeline.adapters.declarative import SiteSpec, parse_html
     from scrapeline.adapters.rawdoc import RawDoc
+    from scrapeline.catalog.datasets import DatasetType
     from scrapeline.errors import ScrapelineError
+    from scrapeline.pipeline.locale import Locale
 
     started = time.monotonic()
     spec_input = json.loads((work / "input.json").read_text())
     report: dict[str, Any] = {"records": [], "rejects": [], "errors": [], "pages_parsed": 0}
     try:
-        spec = SiteSpec.from_yaml(spec_input["spec_yaml"])
+        locale = Locale.model_validate(spec_input.get("locale") or {})
+        definition = spec_input.get("dataset")
+        dataset = DatasetType.model_validate(definition) if definition else None
+    except ValidationError as exc:
+        report["errors"].append({"stage": "input", "error": str(exc)[:2000]})
+        return report
+    try:
+        spec = SiteSpec.from_yaml(spec_input["spec_yaml"], dataset=dataset)
     except ScrapelineError as exc:
         report["errors"].append({"stage": "spec", "error": str(exc)[:2000]})
         return report
@@ -51,7 +65,7 @@ def run(work: Path) -> dict[str, Any]:
             meta={"page": report["pages_parsed"] + 1},
         )
         try:
-            result = parse_html(spec, raw)
+            result = parse_html(spec, raw, locale=locale, dataset=dataset)
         except ScrapelineError as exc:
             report["errors"].append(
                 {"stage": "parse", "page": page["file"], "error": str(exc)[:2000]}

@@ -3,6 +3,10 @@
 Stages: (1) static: spec schema validation / AST security check for python;
 (2) sandbox: parse sample pages offline (`docker run --network none ...`);
 (3) golden: compare records with human-owned expected rows. Output: machine-readable report.
+
+The sandbox reads the pages under the source's locale and receives the dataset definition,
+so user-defined dataset types work there too. Benchmark pages (drift and generation cases)
+are copies of the static-list fixture and use that source's locale.
 """
 
 from __future__ import annotations
@@ -17,15 +21,19 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from scrapeline.adapters.declarative import SiteSpec
+from scrapeline.adapters.declarative import SiteSpec, resolve_dataset
 from scrapeline.agents import sandbox_harness
+from scrapeline.catalog.datasets import DatasetType
 from scrapeline.errors import ConfigError
-from scrapeline.pipeline.models import SCHEMAS
+from scrapeline.pipeline.locale import Locale
 from scrapeline.quality.golden import compare, load_golden
+from scrapeline.registry.config import SourceConfig, load_source_file
 from scrapeline.settings import PROJECT_ROOT, Settings
 
 SandboxMode = Literal["docker", "local"]
 PAGE_URL_PREFIX = "/static-list/"  # drift cases keep the original URL layout
+CASE_SOURCE_ID = "fixture-static-list"  # benchmark pages are copies of this fixture site
+EXCLUDED_FIELDS = frozenset({"attendees", "contact_email", "phone", "signatures"})
 
 ALLOWED_IMPORTS = frozenset(
     {
@@ -144,22 +152,40 @@ def security_check_python(code: str) -> list[str]:
     return findings
 
 
-def _spec_security(spec_yaml: str) -> list[str]:
+def case_source(settings: Settings, source_id: str | None) -> SourceConfig | None:
+    """Config of the source under test; unknown or new sources fall back to the case source."""
+    for candidate in (source_id, CASE_SOURCE_ID):
+        path = settings.sources_dir / f"{candidate}.yaml"
+        if candidate and path.exists():
+            return load_source_file(path)
+    return None
+
+
+def _spec_security(
+    spec_yaml: str, dataset: DatasetType | None, source: SourceConfig | None
+) -> list[str]:
     findings = []
     if len(spec_yaml) > 20_000:
         findings.append("spec too large (>20k chars)")
     try:
-        spec = SiteSpec.from_yaml(spec_yaml)
+        spec = SiteSpec.from_yaml(spec_yaml, dataset=dataset)
+        dataset = resolve_dataset(spec.schema_, dataset)
     except ConfigError as exc:
         return [str(exc)[:500]]
-    excluded = {"attendees", "contact_email", "phone", "signatures"}
-    leaked = excluded & set(spec.fields)
+    leaked = EXCLUDED_FIELDS & set(spec.fields)
     if leaked:
         findings.append(f"excluded personal-data fields requested: {sorted(leaked)}")
+    personal = set(dataset.pii_fields) & set(spec.fields)
+    if personal and not (source is not None and source.usage.allow_pii):
+        findings.append(
+            f"personal-data fields {sorted(personal)} need usage.allow_pii on the source"
+        )
     return findings
 
 
-def _prepare_workdir(spec_yaml: str, pages_dir: Path, base_url: str) -> Path:
+def _prepare_workdir(
+    spec_yaml: str, pages_dir: Path, base_url: str, locale: Locale, dataset: DatasetType
+) -> Path:
     scratch = PROJECT_ROOT / "data" / "sandbox"
     scratch.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="case-", dir=scratch))
@@ -169,9 +195,15 @@ def _prepare_workdir(spec_yaml: str, pages_dir: Path, base_url: str) -> Path:
         shutil.copy2(f, work / f.name)
         url = f"{base_url}{PAGE_URL_PREFIX}{'' if f.name == 'index.html' else f.name}"
         pages.append({"file": f.name, "url": url})
-    (work / "input.json").write_text(
-        json.dumps({"spec_yaml": spec_yaml, "base_url": base_url, "pages": pages, "max_pages": 10})
-    )
+    spec_input = {
+        "spec_yaml": spec_yaml,
+        "base_url": base_url,
+        "pages": pages,
+        "max_pages": 10,
+        "locale": locale.model_dump(mode="json"),
+        "dataset": dataset.model_dump(mode="json"),
+    }
+    (work / "input.json").write_text(json.dumps(spec_input))
     work.chmod(0o755)
     for p in work.iterdir():
         p.chmod(0o644)
@@ -229,18 +261,30 @@ def evaluate_spec(
     mode: SandboxMode = "docker",
     base_url: str = "http://localhost:8080",
     min_records: int = 1,
+    source_id: str | None = None,
+    locale: Locale | None = None,
+    dataset: DatasetType | None = None,
 ) -> TesterReport:
     """Golden mode when `golden_path` is given; otherwise self-consistency mode for new sites
     (records on every parsed page, all sample pages reached, no rejects/errors, unique ids,
     canonical ids not synthesized for most rows). Self-consistency is weaker evidence than
-    golden rows; a human still checks sample rows in the PR."""
+    golden rows; a human still checks sample rows in the PR.
+
+    The locale is `locale`, else the config of `source_id`, else the case source's. The
+    dataset is `dataset`, else the registry entry the spec names.
+    """
     started = time.monotonic()
     report = TesterReport(passed=False, stage="static", sandbox_mode=mode)
-    report.security = _spec_security(spec_yaml)
+    source = case_source(settings, source_id)
+    report.security = _spec_security(spec_yaml, dataset, source)
     if report.security:
         report.duration_ms = int((time.monotonic() - started) * 1000)
         return report
-    work = _prepare_workdir(spec_yaml, pages_dir, base_url)
+    spec = SiteSpec.from_yaml(spec_yaml, dataset=dataset)
+    dataset = resolve_dataset(spec.schema_, dataset)
+    if locale is None:
+        locale = source.locale if source is not None else Locale()
+    work = _prepare_workdir(spec_yaml, pages_dir, base_url, locale, dataset)
     try:
         report.stage = "sandbox"
         out = _run_sandbox(work, settings, mode)
@@ -249,8 +293,7 @@ def evaluate_spec(
     report.errors = out.get("errors", [])
     report.pages_parsed = int(out.get("pages_parsed", 0))
     report.rejects = len(out.get("rejects", []))
-    spec = SiteSpec.from_yaml(spec_yaml)
-    model = SCHEMAS[spec.schema_]
+    model = dataset.record_model()
     records = []
     for row in out.get("records", []):
         if row.get("record_type") != model.record_type:
