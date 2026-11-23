@@ -1,8 +1,8 @@
-.PHONY: setup up down shell image sandbox-image sandbox-check test test-int test-browser lint fmt type check migrate eval eval-baseline api demo
+.PHONY: setup up down shell image sandbox-image sandbox-check test test-int test-browser lint fmt type check lint-imports migrate datasets eval eval-baseline api demo demo-history lake dbt dbt-docs
 
 setup:          ## one-time: python 3.12 venv + deps + chromium for local runs
 	uv python install 3.12
-	uv sync --extra serve
+	uv sync --extra serve --extra analytics
 	uv run playwright install chromium
 	uv run pre-commit install
 
@@ -48,6 +48,12 @@ check:         ## lint + types + unit tests (pipefail-safe gate)
 migrate:
 	uv run alembic upgrade head
 
+datasets:       ## register dataset types (built-in packs + config/datasets) in the catalog
+	uv run scrapeline dataset sync
+
+lint-imports:   ## enforce layer contracts (.importlinter)
+	uv run lint-imports
+
 eval:           ## agent evals: repair + generation (costs money; needs ANTHROPIC_API_KEY)
 	uv run scrapeline eval run --suite repair --driver anthropic
 	uv run scrapeline eval run --suite generation --driver anthropic
@@ -61,3 +67,15 @@ api:            ## read API on :8000
 
 demo:           ## end-to-end demo (no API key needed)
 	bash scripts/demo.sh
+
+demo-history:   ## simulated shop over three days: prices, stock, removals in the history
+	bash scripts/demo_history.sh
+
+lake:           ## export Postgres to the Parquet lake in data/lake
+	uv run scrapeline lake export
+
+dbt:            ## build and test the dbt project over the lake
+	uv run --extra analytics dbt build --project-dir dbt --profiles-dir dbt
+
+dbt-docs:       ## generate dbt docs (catalog and lineage)
+	uv run --extra analytics dbt docs generate --project-dir dbt --profiles-dir dbt
