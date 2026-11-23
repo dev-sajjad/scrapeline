@@ -21,7 +21,8 @@ from tests.conftest import ROOT, SNAPSHOTS, public_resolver
 ADMIN_URL = os.environ.get(
     "DATABASE_URL", "postgresql+psycopg://scrapeline:scrapeline@localhost:5432/scrapeline"
 )
-TEST_DB = "scrapeline_test"
+# Parallel workers (one per agent worktree) each set their own database name.
+TEST_DB = os.environ.get("SCRAPELINE_TEST_DB", "scrapeline_test")
 
 
 @pytest.fixture(scope="session")
@@ -47,9 +48,11 @@ def clean_db(engine: Engine) -> Engine:
     with engine.begin() as conn:
         conn.execute(
             text(
-                "TRUNCATE ops.check_result, ops.incident, pipeline.rejects, raw.fetch_log, "
-                "agenda_items, documents, meetings, bodies, ops.job, ops.run, scraper_versions, "
-                "sources, jurisdictions RESTART IDENTITY CASCADE"
+                "TRUNCATE data.record_versions, data.records, ops.event, ops.check_result, "
+                "ops.incident, pipeline.rejects, raw.fetch_log, agenda_items, documents, "
+                "meetings, bodies, ops.job, ops.run, scraper_versions, sources, jurisdictions, "
+                "catalog.classification_log, catalog.site, catalog.dataset_type "
+                "RESTART IDENTITY CASCADE"
             )
         )
     return engine

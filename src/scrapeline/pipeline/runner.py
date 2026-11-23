@@ -494,7 +494,12 @@ class Runner:
 
         with self.engine.begin() as conn:
             self._write_common(conn, cfg, summary.run_id, collected)
-            ctx = LoadContext(cfg.id, cfg.jurisdiction.id, summary.run_id, version_id)
+            ctx = LoadContext(
+                cfg.id,
+                cfg.jurisdiction.id if cfg.jurisdiction else None,
+                summary.run_id,
+                version_id,
+            )
             stats = load_records(conn, ctx, collected.items)
             summary.loaded = {k: v.as_dict() for k, v in stats.items()}
             conn.execute(

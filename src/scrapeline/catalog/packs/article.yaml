@@ -1,0 +1,16 @@
+name: article
+version: 1
+pack: media
+description: A news article, blog post or similar published text.
+canonical_url_field: url
+fields:
+  url:          {type: url, key: true}
+  title:        {type: text, required: true}
+  published_at: {type: datetime}
+  updated_at:   {type: datetime}
+  author:       {type: text, pii: true, description: Byline; personal data}
+  section:      {type: text}
+  summary:      {type: text}
+  word_count:   {type: int}
+  language:     {type: text, description: BCP 47 language tag}
+  image_url:    {type: url}

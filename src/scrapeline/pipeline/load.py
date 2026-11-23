@@ -48,7 +48,7 @@ class LoadStats:
 @dataclass
 class LoadContext:
     source_id: str
-    jurisdiction_id: str
+    jurisdiction_id: str | None
     run_id: uuid.UUID
     scraper_version_id: int | None
     now: datetime = field(default_factory=lambda: datetime.now(UTC))

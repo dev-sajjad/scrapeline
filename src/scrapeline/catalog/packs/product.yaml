@@ -1,0 +1,20 @@
+name: product
+version: 1
+pack: commerce
+description: A product or item offered for sale on a web page.
+canonical_url_field: url
+fields:
+  url:            {type: url, key: true, description: Product page URL}
+  title:          {type: text, required: true}
+  price:          {type: money, description: Current selling price}
+  list_price:     {type: money, description: Price before any discount}
+  in_stock:       {type: bool}
+  stock_quantity: {type: int}
+  availability:   {type: text, description: Availability text as shown on the page}
+  sku:            {type: text}
+  brand:          {type: text}
+  category:       {type: text}
+  rating:         {type: float, description: Average rating on a 0-5 scale}
+  review_count:   {type: int}
+  image_url:      {type: url}
+  description:    {type: text}

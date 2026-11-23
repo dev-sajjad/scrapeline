@@ -14,7 +14,7 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-SCHEMAS = ("ops", "raw", "pipeline", "evals")
+SCHEMAS = ("ops", "raw", "pipeline", "evals", "catalog", "data")
 
 
 def include_name(name: str | None, type_: str, parent_names: object) -> bool:

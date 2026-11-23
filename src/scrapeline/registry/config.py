@@ -10,9 +10,17 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from scrapeline.errors import ConfigError, StatusTransitionError
+from scrapeline.pipeline.locale import Locale
 
 Status = Literal["draft", "active", "broken", "retired"]
 Pagination = Literal["none", "next-link", "page-number", "cursor", "load-more", "offset"]
@@ -54,6 +62,16 @@ class Legal(_Strict):
     notes: str
 
 
+class UsageRights(_Strict):
+    """Why the data is collected and how it may be used. Checked before personal data is kept."""
+
+    purpose: str = ""
+    license: str | None = None
+    allow_pii: bool = False
+    retention_days: int | None = Field(default=None, ge=1)
+    terms_url: str | None = None
+
+
 class WatermarkConfig(_Strict):
     field: str = "source_modified_at"
     initial_lookback_days: int = Field(default=365, ge=1)
@@ -85,12 +103,15 @@ class SourceConfig(_Strict):
     tenant: str | None = None
     kind: Literal["api", "html", "js", "pdf_index"]
     entry: str
-    jurisdiction: Jurisdiction
+    jurisdiction: Jurisdiction | None = None
     allowed_hosts: list[str] = Field(default_factory=list)
     cadence: str = "daily"
     politeness: Politeness = Politeness()
     legal: Legal
     schema_: str = Field(default="Meeting", alias="schema")
+    dataset: str | None = None
+    locale: Locale = Locale()
+    usage: UsageRights = UsageRights()
     watermark: WatermarkConfig = WatermarkConfig()
     adapter: str
     status: Status = "draft"
@@ -108,6 +129,19 @@ class SourceConfig(_Strict):
         if urlsplit(value).scheme not in ("http", "https"):
             raise ValueError("entry must be an http(s) URL")
         return value
+
+    @model_validator(mode="after")
+    def _civic_needs_jurisdiction(self) -> SourceConfig:
+        from scrapeline.pipeline.models import SCHEMAS
+
+        if self.dataset is None and self.schema_ in SCHEMAS and self.jurisdiction is None:
+            raise ValueError(f"schema {self.schema_} needs a jurisdiction")
+        return self
+
+    @property
+    def dataset_name(self) -> str:
+        """Dataset type this source produces; typed civic sources use their schema name."""
+        return self.dataset or self.schema_
 
     @property
     def hosts(self) -> list[str]:

@@ -11,6 +11,10 @@ class ConfigError(ScrapelineError):
     """Invalid source config, settings or registry state."""
 
 
+class DatasetError(ConfigError):
+    """A dataset type is unknown, invalid, or redefined without a version bump."""
+
+
 class StatusTransitionError(ConfigError):
     """Illegal source status transition (e.g. retired -> active)."""
 
@@ -64,6 +68,10 @@ class ParseError(ScrapelineError):
 
 class EmptyResultError(ParseError):
     """A 200 response produced zero records where records were expected."""
+
+
+class AmbiguousValueError(ParseError):
+    """A value has more than one valid reading under the source's locale (e.g. 03/04/2026)."""
 
 
 class QualityCheckError(ScrapelineError):

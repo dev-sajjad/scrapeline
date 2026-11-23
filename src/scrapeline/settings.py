@@ -18,9 +18,11 @@ class Settings(BaseSettings):
     scrapeline_env: Literal["dev", "test", "prod"] = "dev"
     database_url: str = "postgresql+psycopg://scrapeline:scrapeline@localhost:5432/scrapeline"
 
-    # Raw store
+    # Storage and config locations
     raw_store_dir: Path = PROJECT_ROOT / "data" / "raw"
     sources_dir: Path = PROJECT_ROOT / "config" / "sources"
+    datasets_dir: Path = PROJECT_ROOT / "config" / "datasets"
+    lake_dir: Path = PROJECT_ROOT / "data" / "lake"
 
     # Crawler identity: public contact only.
     crawler_user_agent: str = "scrapeline/0.1 (+https://github.com/dev-sajjad/scrapeline)"

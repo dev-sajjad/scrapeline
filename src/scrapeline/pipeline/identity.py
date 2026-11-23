@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import date, datetime, time
+from decimal import Decimal
 from typing import Any
 
 from scrapeline.pipeline.models import Record
@@ -19,6 +20,8 @@ from scrapeline.pipeline.normalise import fold
 def _default(value: Any) -> str:
     if isinstance(value, datetime | date | time):
         return value.isoformat()
+    if isinstance(value, Decimal):
+        return format(value.normalize(), "f")  # 5.00 and 5.0 are the same price
     raise TypeError(f"not serialisable: {type(value).__name__}")
 
 

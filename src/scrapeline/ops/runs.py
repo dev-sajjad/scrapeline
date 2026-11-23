@@ -9,47 +9,43 @@ from typing import Any
 from sqlalchemy import Connection, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
+from scrapeline.catalog.repository import ensure_site
 from scrapeline.registry.config import SourceConfig, check_transition
 from scrapeline.store import tables as t
 
 
 def sync_source(conn: Connection, cfg: SourceConfig) -> str:
-    """Upsert jurisdiction + source row from YAML. Returns the effective (DB) status.
+    """Upsert the source row (plus its site and jurisdiction) from YAML. Returns the DB status.
 
     YAML status is the initial status; afterwards the DB owns runtime status (broken, active).
     """
-    j = cfg.jurisdiction
-    conn.execute(
-        insert(t.jurisdictions)
-        .values(id=j.id, name=j.name, state=j.state, country=j.country)
-        .on_conflict_do_update(
-            index_elements=[t.jurisdictions.c.id],
-            set_={"name": j.name, "state": j.state, "country": j.country},
+    jurisdiction_id = None
+    if cfg.jurisdiction is not None:
+        j = cfg.jurisdiction
+        jurisdiction_id = j.id
+        conn.execute(
+            insert(t.jurisdictions)
+            .values(id=j.id, name=j.name, state=j.state, country=j.country)
+            .on_conflict_do_update(
+                index_elements=[t.jurisdictions.c.id],
+                set_={"name": j.name, "state": j.state, "country": j.country},
+            )
         )
-    )
-    config_json = cfg.model_dump(mode="json", by_alias=True)
-    stmt = insert(t.sources).values(
-        id=cfg.id,
-        name=cfg.name,
-        platform=cfg.platform,
-        tenant=cfg.tenant,
-        jurisdiction_id=j.id,
-        status=cfg.status,
-        config_version=cfg.config_version,
-        config=config_json,
-    )
+    columns = {
+        "name": cfg.name,
+        "platform": cfg.platform,
+        "tenant": cfg.tenant,
+        "jurisdiction_id": jurisdiction_id,
+        "config_version": cfg.config_version,
+        "config": cfg.model_dump(mode="json", by_alias=True),
+        "site_id": ensure_site(conn, cfg.entry),
+        "dataset": cfg.dataset_name,
+    }
     conn.execute(
-        stmt.on_conflict_do_update(
-            index_elements=[t.sources.c.id],
-            set_={
-                "name": cfg.name,
-                "platform": cfg.platform,
-                "tenant": cfg.tenant,
-                "jurisdiction_id": j.id,
-                "config_version": cfg.config_version,
-                "config": config_json,
-                "updated_at": func.now(),
-            },
+        insert(t.sources)
+        .values(id=cfg.id, status=cfg.status, **columns)
+        .on_conflict_do_update(
+            index_elements=[t.sources.c.id], set_={**columns, "updated_at": func.now()}
         )
     )
     status: str = conn.execute(

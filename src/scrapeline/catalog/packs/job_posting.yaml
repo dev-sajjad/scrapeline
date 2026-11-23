@@ -1,0 +1,18 @@
+name: job_posting
+version: 1
+pack: jobs
+description: A job vacancy advertised on a web page.
+canonical_url_field: url
+fields:
+  url:             {type: url, key: true}
+  title:           {type: text, required: true}
+  employer:        {type: text}
+  location:        {type: text}
+  remote:          {type: bool}
+  employment_type: {type: enum, values: [full_time, part_time, contract, temporary, internship, other]}
+  salary_min:      {type: money}
+  salary_max:      {type: money}
+  salary_period:   {type: enum, values: [hour, day, week, month, year]}
+  posted_on:       {type: date}
+  closes_on:       {type: date}
+  description:     {type: text}

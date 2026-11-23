@@ -12,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     MetaData,
     String,
@@ -60,6 +61,8 @@ sources = Table(
     Column("watermark", DateTime(timezone=True)),
     _ts("created_at", default=True),
     _ts("updated_at", default=True),
+    Column("site_id", BigInteger, ForeignKey("catalog.site.id")),
+    Column("dataset", String(100)),
 )
 
 scraper_versions = Table(
@@ -357,4 +360,123 @@ eval_case_result = Table(
     Column("details", JSONB, nullable=False, server_default="{}"),
     _ts("created_at", default=True),
     schema="evals",
+)
+
+# Migration 0005: catalog, generic records with history, events
+
+site_category = Table(
+    "site_category",
+    metadata,
+    Column("code", String(30), primary_key=True),
+    Column("label", Text, nullable=False),
+    Column("description", Text, nullable=False),
+    Column("taxonomy_version", Integer, nullable=False),
+    schema="catalog",
+)
+
+site = Table(
+    "site",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("host", String(255), nullable=False, unique=True),
+    Column("registered_domain", String(255)),
+    Column(
+        "category",
+        String(30),
+        ForeignKey("catalog.site_category.code"),
+        nullable=False,
+        server_default="unclassified",
+    ),
+    Column("category_confidence", Float),
+    Column("category_method", String(20), nullable=False, server_default="none"),
+    Column("category_evidence", JSONB, nullable=False, server_default="[]"),
+    Column("tags", JSONB, nullable=False, server_default="[]"),
+    Column("country", String(2)),
+    Column("language", String(35)),
+    Column("platform", String(50)),
+    _ts("classified_at", nullable=True),
+    _ts("created_at", default=True),
+    _ts("updated_at", default=True),
+    schema="catalog",
+)
+
+classification_log = Table(
+    "classification_log",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("site_id", BigInteger, ForeignKey("catalog.site.id"), nullable=False, index=True),
+    Column("old_category", String(30)),
+    Column("new_category", String(30), nullable=False),
+    Column("confidence", Float),
+    Column("method", String(20), nullable=False),
+    Column("evidence", JSONB, nullable=False, server_default="[]"),
+    Column("taxonomy_version", Integer, nullable=False),
+    Column("actor", String(100), nullable=False),
+    _ts("created_at", default=True),
+    schema="catalog",
+)
+
+dataset_type = Table(
+    "dataset_type",
+    metadata,
+    Column("name", String(100), primary_key=True),
+    Column("version", Integer, primary_key=True),
+    Column("pack", String(50), nullable=False),
+    Column("storage", String(10), nullable=False),
+    Column("description", Text, nullable=False),
+    Column("fields", JSONB, nullable=False),
+    Column("key_fields", JSONB, nullable=False),
+    Column("definition_hash", String(64), nullable=False),
+    _ts("created_at", default=True),
+    schema="catalog",
+)
+
+records = Table(
+    "records",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("dataset", String(100), nullable=False),
+    Column("payload", JSONB, nullable=False),
+    Column("current_version", Integer, nullable=False, server_default="1"),
+    _ts("removed_at", nullable=True),
+    *_lineage(),
+    UniqueConstraint("source_id", "dataset", "external_id", name="uq_records_identity"),
+    Index("ix_records_dataset_last_seen", "dataset", "last_seen_at"),
+    schema="data",
+)
+
+record_versions = Table(
+    "record_versions",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("record_id", BigInteger, ForeignKey("data.records.id"), nullable=False),
+    Column("version", Integer, nullable=False),
+    Column("change_type", String(10), nullable=False),  # insert | update | removed | restored
+    Column("payload", JSONB),
+    Column("content_hash", String(64)),
+    _ts("valid_from"),
+    Column("run_id", UUID(as_uuid=True), ForeignKey("ops.run.id"), nullable=False),
+    Column("scraper_version_id", Integer, ForeignKey("scraper_versions.id")),
+    Column("raw_sha256", String(64)),
+    _ts("created_at", default=True),
+    UniqueConstraint("record_id", "version", name="uq_record_versions_record_version"),
+    schema="data",
+)
+
+event = Table(
+    "event",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    _ts("at", default=True),
+    Column("kind", String(50), nullable=False),
+    Column("level", String(10), nullable=False, server_default="info"),
+    Column("source_id", String(100)),
+    Column("run_id", UUID(as_uuid=True)),
+    Column("job_id", BigInteger),
+    Column("message", Text, nullable=False, server_default=""),
+    Column("data", JSONB, nullable=False, server_default="{}"),
+    Index("ix_event_at", "at"),
+    Index("ix_event_run_id", "run_id"),
+    Index("ix_event_source_id_at", "source_id", "at"),
+    schema="ops",
 )
