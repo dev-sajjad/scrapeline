@@ -1,0 +1,21 @@
+# A job board: Real Python's "Fake Python" page, a static practice site for scraping tutorials.
+# Existing dataset type `job_posting`; one page, no pagination, collected weekly.
+id: fake-python-jobs
+name: Fake Python job board
+start_urls: [https://realpython.github.io/fake-jobs/]
+collect: >-
+  Every job card: job title, company, location, the date it was posted and the
+  link to the full posting.
+dataset: job_posting
+fields:
+  url: url
+  title: text
+  employer: text
+  location: text
+  posted_on: date
+crawl: {pagination: none, max_pages: 1, render: never}
+schedule: weekly
+locale: {language: en-US, date_order: ymd}
+usage:
+  purpose: Show how job postings appear and disappear on a board.
+  retention_days: 90

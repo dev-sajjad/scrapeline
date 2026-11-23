@@ -20,7 +20,10 @@ CADENCE = {"hourly": timedelta(hours=1), "daily": timedelta(days=1), "weekly": t
 def schedule_due(
     engine: Engine, sources: dict[str, SourceConfig], now: datetime | None = None
 ) -> list[str]:
-    """Enqueue a `run` job for every active source whose cadence has elapsed since its last run."""
+    """Enqueue a `run` job for every active source whose cadence has elapsed since its last run.
+
+    Sources with cadence "manual" are never enqueued here; they run only when asked to.
+    """
     now = now or datetime.now(UTC)
     enqueued = []
     with engine.connect() as conn:
@@ -33,7 +36,7 @@ def schedule_due(
             ).all()
         )
     for sid, cfg in sources.items():
-        if status.get(sid, cfg.status) != "active":
+        if cfg.cadence == "manual" or status.get(sid, cfg.status) != "active":
             continue
         every = CADENCE.get(cfg.cadence, timedelta(days=1))
         if last.get(sid) is None or now - last[sid] >= every:
