@@ -25,7 +25,6 @@ import hashlib
 import ipaddress
 import re
 from dataclasses import dataclass
-from datetime import date
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
@@ -42,7 +41,13 @@ from scrapeline.catalog.datasets import (
 )
 from scrapeline.errors import ConfigError, DatasetError
 from scrapeline.pipeline.locale import Locale
-from scrapeline.registry.config import Pagination, SourceConfig, UsageRights, WatermarkConfig
+from scrapeline.registry.config import (
+    UNREVIEWED_TERMS,
+    Pagination,
+    SourceConfig,
+    UsageRights,
+    WatermarkConfig,
+)
 
 PaginationRequest = Literal["auto", "none", "next-link", "page-number", "cursor", "load-more"]
 Schedule = Literal["manual", "hourly", "daily", "weekly"]
@@ -227,8 +232,6 @@ def generator_supports(dataset: DatasetType | None) -> bool:
 
 
 DECLARATIVE_ADAPTER = "scrapeline.adapters.declarative:DeclarativeAdapter"
-# A date no real review has: it marks `legal.terms_checked` as "not reviewed yet".
-UNREVIEWED_TERMS = date(1970, 1, 1)
 UNKNOWN_JURISDICTION = {"id": "xx-unknown", "name": "TODO(human): jurisdiction", "country": "XX"}
 
 _PAGINATION: dict[str, Pagination] = {

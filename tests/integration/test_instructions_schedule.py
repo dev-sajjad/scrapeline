@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from sqlalchemy import Engine, select
@@ -10,7 +10,7 @@ from sqlalchemy import Engine, select
 from scrapeline.catalog.datasets import DatasetRegistry
 from scrapeline.ops.runs import set_status, sync_source
 from scrapeline.ops.worker import schedule_due
-from scrapeline.registry.config import SourceConfig
+from scrapeline.registry.config import Legal, SourceConfig
 from scrapeline.registry.instruction import ScrapeInstruction, compile_instruction
 from scrapeline.store import tables as t
 
@@ -29,9 +29,12 @@ usage: {{purpose: Scheduler test}}
 
 
 def compiled_source(source_id: str, schedule: str) -> SourceConfig:
+    """A compiled draft whose terms a human has reviewed, so it may be activated."""
     text = INSTRUCTION.format(id=source_id, schedule=schedule)
     ins = ScrapeInstruction.from_yaml(text)
-    return compile_instruction(ins, DatasetRegistry.load(())).source
+    source = compile_instruction(ins, DatasetRegistry.load(())).source
+    reviewed = Legal(terms_checked=date(2026, 11, 24), notes="Reviewed in test.")
+    return source.model_copy(update={"legal": reviewed})
 
 
 def test_schedule_due_never_enqueues_manual_sources(clean_db: Engine) -> None:
