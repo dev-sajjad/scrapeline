@@ -15,8 +15,8 @@ from typing import Any
 from urllib.parse import quote, urlencode
 
 from scrapeline.adapters.base import BaseAdapter, Window
-from scrapeline.adapters.rawdoc import ParseResult, RawDoc, Target
-from scrapeline.errors import ParseError
+from scrapeline.adapters.rawdoc import ParseResult, RawDoc, Reject, Target
+from scrapeline.errors import AmbiguousValueError, ParseError
 from scrapeline.pipeline.models import Body, Document, Meeting
 from scrapeline.pipeline.normalise import clean_text, parse_date, parse_datetime_utc, parse_time
 
@@ -73,7 +73,12 @@ class LegistarAdapter(BaseAdapter):
                 self._parse_body(item, result)
         elif raw.kind == "events":
             for item in payload:
-                self._parse_event(item, result)
+                try:
+                    self._parse_event(item, result)
+                except AmbiguousValueError as exc:
+                    reason = f"ambiguous value(s): {exc}"
+                    data = {"EventId": item.get("EventId"), "EventDate": item.get("EventDate")}
+                    result.rejects.append(Reject(record_type="meeting", data=data, reason=reason))
             if len(payload) >= self.page_size and "filter" in raw.meta:
                 skip = int(raw.meta.get("skip", 0)) + self.page_size
                 result.next_targets.append(self._events_target(str(raw.meta["filter"]), skip))
@@ -93,8 +98,7 @@ class LegistarAdapter(BaseAdapter):
             },
         )
 
-    @staticmethod
-    def _parse_event(item: dict[str, Any], result: ParseResult) -> None:
+    def _parse_event(self, item: dict[str, Any], result: ParseResult) -> None:
         event_id = str(item.get("EventId", ""))
         agenda_status = (item.get("EventAgendaStatusName") or "").lower()
         comment = (item.get("EventComment") or "").lower()
@@ -109,7 +113,7 @@ class LegistarAdapter(BaseAdapter):
                 "external_id": event_id,
                 "canonical_url": clean_text(item.get("EventInSiteURL")),
                 "title": item.get("EventBodyName"),
-                "meeting_date": parse_date(item.get("EventDate")),
+                "meeting_date": parse_date(item.get("EventDate"), locale=self.source.locale),
                 "start_time": parse_time(item.get("EventTime")),
                 "body_external_id": str(item["EventBodyId"]) if item.get("EventBodyId") else None,
                 "body_name": item.get("EventBodyName"),
