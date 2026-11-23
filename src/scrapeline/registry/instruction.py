@@ -505,8 +505,7 @@ def _next_steps(
     steps += [
         f"Review the terms of use and robots.txt of {', '.join(source.hosts)}; record the "
         "review date in legal.terms_checked and why collecting is allowed in legal.notes.",
-        f"Draft live run: scrapeline source sync, then scrapeline run {sid}; check the sample "
-        "rows and the quality checks.",
+        f"Draft live run: scrapeline run {sid}; check the sample rows and the quality checks.",
         f"Activate: scrapeline source set-status {sid} active.",
     ]
     if ins.schedule == "manual":
