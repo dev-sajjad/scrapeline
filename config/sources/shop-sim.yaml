@@ -1,0 +1,31 @@
+# Simulated shop whose catalogue changes over three "days" (tests/sites/shop-sim/, built by
+# scripts/build_shop_sim.py). SHOP_SIM_DAY picks the day a run sees: 1 (default), 2 or 3.
+#   SHOP_SIM_DAY=2 scrapeline run shop-sim
+id: shop-sim
+name: "Fixture — Simulated shop with changing prices and stock"
+platform: fixture
+kind: html
+entry: ${FIXTURE_BASE_URL}/shop-sim/day-${SHOP_SIM_DAY:-1}/
+cadence: manual
+politeness: { rps: 5, concurrency: 1, respect_robots: true }
+legal:
+  terms_checked: 2026-11-24
+  notes: "Fixture site owned by this project; made-up products, no personal data."
+schema: product
+dataset: product
+locale: { language: en-GB, timezone: Europe/London, currency: GBP }
+usage:
+  purpose: "Demonstrate price and stock history across catalogue snapshots."
+  allow_pii: false
+adapter: scrapeline.adapters.declarative:DeclarativeAdapter
+pagination: next-link
+max_pages_per_run: 10
+status: active
+config_version: 1
+quality:
+  min_records: 15
+  max_records: 30
+  max_null_rate: { url: 0.0, title: 0.0, sku: 0.0, price: 0.0, in_stock: 0.0 }
+options:
+  # `scrapeline verify shop-sim` compares the latest run with the golden rows of this day.
+  golden: shop-sim-day-${SHOP_SIM_DAY:-1}

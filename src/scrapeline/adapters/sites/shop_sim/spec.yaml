@@ -1,0 +1,13 @@
+# Site adapter for the shop-sim fixture (tests/sites/shop-sim/, scripts/build_shop_sim.py).
+# Same markup every day; only prices, stock and the product list change.
+spec_version: 1
+schema: product
+record: ul.products li.product
+fields:
+  url:      {css: a.name, attr: href}
+  title:    {css: a.name}
+  sku:      {attr: data-sku}
+  category: {css: p.category, optional: true}
+  price:    {css: p.price}
+  in_stock: {css: p.stock, map: {"In stock": true, "Out of stock": false}}
+next_page: {css: 'a[rel=next]', attr: href}
