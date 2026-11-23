@@ -152,6 +152,14 @@ def test_apply_refuses_environment_references(
     assert not dirs["sources"].exists()
 
 
+def test_apply_refuses_credentials_and_local_hosts(tmp_path: Path, dirs: dict[str, Path]) -> None:
+    for url in ("https://user:secret@shop.example.com/books", "http://127.0.0.1/admin"):
+        text = NEW_DATASET.replace("https://shop.example.com/books", url)
+        code, out = apply(write(tmp_path, text), dirs)
+        assert code == 1 and "start URL" in out["error"]
+    assert not dirs["sources"].exists() and not dirs["sites"].exists()
+
+
 def test_apply_writes_a_draft_when_a_dataset_proposal_is_needed(
     tmp_path: Path, dirs: dict[str, Path]
 ) -> None:

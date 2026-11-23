@@ -22,6 +22,7 @@ dataset type, completes the adapter, reviews the site's terms and activates it.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import re
 from dataclasses import dataclass
 from datetime import date
@@ -75,12 +76,31 @@ class ScrapeInstruction(_Strict):
 
     @field_validator("start_urls")
     @classmethod
-    def _http_urls(cls, urls: list[str]) -> list[str]:
+    def _public_http_urls(cls, urls: list[str]) -> list[str]:
         for url in urls:
             parts = urlsplit(url)
             if parts.scheme not in ("http", "https") or not parts.hostname:
                 raise ValueError(f"start URL must be http(s) with a host: {url!r}")
+            # The URL is written into a committed source config: credentials never go there.
+            if parts.username is not None or parts.password is not None:
+                raise ValueError("start URLs may not contain a user name or password")
+            problem = host_problem(parts.hostname)
+            if problem:
+                raise ValueError(f"start URL host {parts.hostname!r}: {problem}")
         return urls
+
+    @field_validator("allowed_hosts")
+    @classmethod
+    def _public_hosts(cls, hosts: list[str]) -> list[str]:
+        for host in hosts:
+            if urlsplit(f"//{host}").hostname != host.lower():
+                raise ValueError(
+                    f"allowed_hosts takes bare host names such as docs.example.com, not {host!r}"
+                )
+            problem = host_problem(host)
+            if problem:
+                raise ValueError(f"allowed host {host!r}: {problem}")
+        return hosts
 
     @field_validator("fields")
     @classmethod
@@ -153,6 +173,38 @@ class ScrapeInstruction(_Strict):
             return cls.model_validate(data)
         except Exception as exc:
             raise ConfigError(f"invalid instruction: {exc}") from exc
+
+
+# Top-level names that never resolve on the public internet (RFC 2606, 6761, 6762, 8375,
+# ICANN's .internal) plus suffixes that private networks commonly use.
+_PRIVATE_TLDS = frozenset(
+    "localhost local localdomain internal intranet lan home corp private "
+    "test example invalid onion arpa".split()
+)
+
+
+def host_problem(host: str) -> str | None:
+    """Why `host` is not a public DNS name, or None. Static checks only, no DNS lookup.
+
+    The URL policy still resolves and checks every address at fetch time; this keeps IP
+    literals and local names out of a source config before it is written and committed.
+    """
+    name = host.lower().rstrip(".")
+    try:
+        ipaddress.ip_address(name)
+    except ValueError:
+        pass
+    else:
+        return "IP addresses are not allowed; use the site's host name"
+    labels = name.split(".")
+    if not all(labels) or not all(c.isalnum() or c in "-_" for label in labels for c in label):
+        return "not a valid host name"
+    if len(labels) < 2 or labels[-1] in _PRIVATE_TLDS:
+        return "not a public host name"
+    if not labels[-1][0].isalpha():
+        # Numeric forms such as 127.1 or 0x7f.1, which resolvers read as IP addresses.
+        return "IP addresses are not allowed; use the site's host name"
+    return None
 
 
 DECLARATIVE_ADAPTER = "scrapeline.adapters.declarative:DeclarativeAdapter"

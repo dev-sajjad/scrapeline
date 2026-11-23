@@ -17,6 +17,7 @@ from scrapeline.registry.instruction import (
     CompiledInstruction,
     ScrapeInstruction,
     compile_instruction,
+    host_problem,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -299,6 +300,58 @@ def test_environment_references_are_refused(reference: str) -> None:
     text = BASE.replace("Every book:", f"Every {reference} book:")
     with pytest.raises(ConfigError, match=r'contain "\$\{"'):
         compile_instruction(ScrapeInstruction.from_yaml(text + "dataset: product\n"), REGISTRY)
+
+
+@pytest.mark.parametrize(
+    ("url", "reason"),
+    [
+        ("https://user:secret@shop.example.com/", "user name or password"),
+        ("https://user@shop.example.com/", "user name or password"),
+        ("http://127.0.0.1/admin", "IP addresses"),
+        ("http://169.254.169.254/latest/meta-data/", "IP addresses"),
+        ("http://[::1]:8080/", "IP addresses"),
+        ("http://127.1/", "IP addresses"),
+        ("http://0x7f.0.0.1/", "IP addresses"),
+        ("http://2130706433/", "not a public host name"),
+        ("http://localhost:8080/", "not a public host name"),
+        ("http://app.localhost/", "not a public host name"),
+        ("http://intranet/", "not a public host name"),
+        ("http://printer.local/", "not a public host name"),
+        ("http://metadata.google.internal/", "not a public host name"),
+    ],
+)
+def test_start_urls_must_name_a_public_host(url: str, reason: str) -> None:
+    text = BASE.replace("[https://books.toscrape.com/]", f"['{url}']")
+    with pytest.raises(ConfigError, match=reason):
+        ScrapeInstruction.from_yaml(text + "dataset: product\n")
+
+
+@pytest.mark.parametrize(
+    ("host", "reason"),
+    [
+        ("127.0.0.1", "IP addresses"),
+        ("localhost", "not a public host name"),
+        ("files.corp", "not a public host name"),
+        ("https://docs.example.com", "bare host names"),
+        ("docs.example.com:8443", "bare host names"),
+        ("user@docs.example.com", "bare host names"),
+        ("docs.example.com/files", "bare host names"),
+        ("", "bare host names"),
+        ("docs..example.com", "not a valid host name"),
+    ],
+)
+def test_allowed_hosts_must_be_public_host_names(host: str, reason: str) -> None:
+    text = BASE + f"allowed_hosts: [{host!r}]\ndataset: product\n"
+    with pytest.raises(ConfigError, match=reason):
+        ScrapeInstruction.from_yaml(text)
+
+
+def test_public_host_names_pass_the_static_checks() -> None:
+    for host in ("books.toscrape.com", "Docs.Example.COM", "example.gov.", "xn--bcher-kva.de"):
+        assert host_problem(host) is None, host
+    text = BASE + "allowed_hosts: [img.example.com, Files.Example.org]\ndataset: product\n"
+    hosts = compile_instruction(ScrapeInstruction.from_yaml(text), REGISTRY).source.hosts
+    assert hosts == ["books.toscrape.com", "files.example.org", "img.example.com"]
 
 
 @pytest.mark.parametrize("path", sorted((ROOT / "config/instructions").glob("*.yaml")))

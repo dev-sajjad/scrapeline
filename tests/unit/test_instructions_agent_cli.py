@@ -78,8 +78,16 @@ def test_instruction_file_without_apply_writes_no_source(
         ("other-id", "--instruction", BOOKS),
         ("--instruction-text", "every book on the page"),
         ("some-id",),
+        ("city-x", "--instruction-text", "All meetings", "--entry", "http://localhost/", "--apply"),
     ],
-    ids=["entry-and-file", "text-and-file", "id-mismatch", "no-source-id", "no-instruction"],
+    ids=[
+        "entry-and-file",
+        "text-and-file",
+        "id-mismatch",
+        "no-source-id",
+        "no-instruction",
+        "local-entry",
+    ],
 )
 def test_conflicting_or_missing_arguments_are_refused(
     tmp_path: Path, calls: list[dict[str, Any]], args: tuple[str | Path, ...]

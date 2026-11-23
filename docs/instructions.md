@@ -35,7 +35,7 @@ Complete examples live in [`config/instructions/`](../config/instructions/):
 |---|---|---|
 | `name` | yes | Human name of the source. |
 | `id` | no | Source id (`a-z`, `0-9`, `-`, `_`). Default: a slug of `name`; names without Latin letters get `src-<hash>`. |
-| `start_urls` | yes | 1 to 20 `http(s)` URLs. The first is the entry page; the others are kept in the source's `options.extra_start_urls`. |
+| `start_urls` | yes | 1 to 20 `http(s)` URLs on public host names. The first is the entry page; the others are kept in the source's `options.extra_start_urls`. See [Safety](#safety) for what is refused. |
 | `collect` | yes | What to collect, in plain words (10 to 4000 characters). Kept for the generator agent. |
 | `dataset` | no | Dataset type the records must match: an existing one (`product`, `article`, `job_posting`, `meeting`, or one in `config/datasets/`) or the name of a new one. |
 | `fields` | no | Which fields to collect (existing dataset) or the fields of a new dataset type. See below. |
@@ -47,7 +47,7 @@ Complete examples live in [`config/instructions/`](../config/instructions/):
 | `documents` | no | `ignore` (default), `link-only`, `download`. |
 | `locale` | no | How the site writes values: `language` (BCP 47, default `en`), `timezone` (IANA, e.g. `Europe/London`), `date_order` (`dmy`, `mdy`, `ymd`), `currency` (ISO 4217, e.g. `GBP`), `decimal_separator` (`.` or `,`). Strict by default: without `date_order`, `03/04/2026` is rejected rather than guessed; without `timezone`, times without an offset are rejected. |
 | `usage` | yes | Why the data is collected: `purpose`, `license`, `allow_pii` (default `false`), `retention_days`, `terms_url`. May be `{}`, but a purpose is needed for personal data. |
-| `allowed_hosts` | no | Extra hosts the crawler may fetch (e.g. an image or document host). Start URL hosts are always allowed. |
+| `allowed_hosts` | no | Extra hosts the crawler may fetch (e.g. an image or document host), as bare public host names such as `docs.example.com`. Start URL hosts are always allowed. |
 
 ### Fields and dataset types
 
@@ -104,5 +104,6 @@ Some fields are marked as personal data (`pii`), such as `article.author`. Colle
 ## Safety
 
 - Instruction text is untrusted. Files are written with a YAML serialiser, so quotes or newlines in `collect` or `name` cannot add keys to the source config. Any text containing `${` is refused (`${NAME}`, `${NAME:-default}` or any later form), because source configs expand such references from the environment.
-- Every URL still goes through the URL policy, robots.txt and the rate limit when the trusted worker fetches it (`capture`, `run`). Agents never fetch pages themselves.
+- Start URLs and `allowed_hosts` are checked before anything is written, without a DNS lookup: no user name or password in a URL, no IP addresses, and no `localhost`, single-label or private-network names (`.local`, `.internal`, `.lan`, `.corp`, ...).
+- Every URL still goes through the full URL policy (DNS resolved, private addresses refused), robots.txt and the rate limit when the trusted worker fetches it (`capture`, `run`). Agents never fetch pages themselves.
 - Blocked responses (403, 429, challenge pages) are detected and handled, never evaded.
