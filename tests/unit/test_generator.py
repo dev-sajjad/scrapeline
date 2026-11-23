@@ -7,7 +7,7 @@ import yaml
 from scrapeline.adapters.declarative import spec_path_for
 from scrapeline.agents.generator import SKELETON, generate_site
 from scrapeline.agents.tester import evaluate_spec
-from scrapeline.cli import _draft_source_yaml
+from scrapeline.cli.agents import draft_source_yaml
 from scrapeline.registry.config import SourceConfig
 from scrapeline.settings import Settings
 from tests.unit.test_agents import ScriptedDriver
@@ -60,7 +60,7 @@ def test_self_consistency_requires_reaching_all_pages() -> None:
 
 
 def test_draft_source_yaml_is_valid_and_injection_safe() -> None:
-    text = _draft_source_yaml("city-x", "https://www.example.gov/m", 'say "hi"\nstatus: active')
+    text = draft_source_yaml("city-x", "https://www.example.gov/m", 'say "hi"\nstatus: active')
     cfg = SourceConfig.model_validate(yaml.safe_load(text))
     assert cfg.status == "draft" and cfg.owner == "agent"
     assert cfg.instruction is not None and "status: active" in cfg.instruction.collect
