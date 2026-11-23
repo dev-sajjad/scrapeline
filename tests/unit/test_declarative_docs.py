@@ -9,15 +9,16 @@ from scrapeline.adapters.declarative import SiteSpec, parse_html, spec_path_for
 from scrapeline.adapters.rawdoc import RawDoc
 from scrapeline.errors import ConfigError, ParseError
 from scrapeline.pipeline.documents import extract_pdf
-from scrapeline.pipeline.locale import Locale
 from scrapeline.pipeline.models import Meeting
 from scrapeline.quality.golden import compare, load_golden
+from scrapeline.registry.config import load_source_file
 
 ROOT = Path(__file__).resolve().parents[2]
 SITES = ROOT / "tests" / "sites"
 GOLDEN = ROOT / "tests" / "fixtures" / "golden"
 BASE = "http://localhost:8080"
-FIXTURE_LOCALE = Locale(language="en-US", timezone="UTC", date_order="mdy")
+# The runtime reads the fixture under its source config's locale; so does this test.
+FIXTURE_LOCALE = load_source_file(ROOT / "config/sources/fixture-static-list.yaml").locale
 
 
 def raw_page(site: str, name: str) -> RawDoc:
