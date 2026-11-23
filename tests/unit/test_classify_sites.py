@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -10,11 +11,13 @@ import pytest
 
 from scrapeline.adapters.rawdoc import RawDoc
 from scrapeline.catalog.classify import (
+    _PRICE,
     MAX_EVIDENCE,
     DeterministicClassifier,
     domain_rule,
     host_country,
     normalise_language,
+    page_facts,
 )
 from scrapeline.catalog.sites import UNCLASSIFIED, SiteClassifier
 
@@ -87,6 +90,8 @@ def test_it_implements_the_classifier_contract() -> None:
         ("www.harvard.edu", "education", "US"),
         ("www.ox.ac.uk", "education", "GB"),
         ("www.u-tokyo.ac.jp", "education", "JP"),
+        ("www.univie.ac.at", "education", "AT"),
+        ("ur.ac.rw", "education", "RW"),
         ("www.unimelb.edu.au", "education", "AU"),
         ("www.usp.edu.br", "education", "BR"),
         ("lausd.k12.ca.us", "education", "US"),
@@ -205,6 +210,102 @@ def test_a_german_news_site_and_its_authors_are_not_personal() -> None:
     assert (result.category, result.language, result.country) == ("news_media", "de-DE", "DE")
     assert "personal" not in result.tags
     assert not any(e.signal.endswith(".personal") for e in result.evidence)
+
+
+def yoast_graph(host: str, article_type: str, publisher: dict[str, Any]) -> dict[str, Any]:
+    """JSON-LD the way Yoast SEO writes it: every node in `@graph`, linked by `@id`."""
+    author_id = f"https://{host}/#/schema/person/5f3a"
+    return {
+        "@context": "https://schema.org",
+        "@graph": [
+            {
+                "@type": article_type,
+                "@id": f"https://{host}/2026/11/budget/#article",
+                "isPartOf": {"@id": f"https://{host}/2026/11/budget/"},
+                "author": {"name": "Erika Mustermann", "@id": author_id},
+                "headline": "Budget approved",
+                "publisher": {"@id": publisher["@id"]},
+            },
+            {
+                "@type": "WebPage",
+                "@id": f"https://{host}/2026/11/budget/",
+                "isPartOf": {"@id": f"https://{host}/#website"},
+            },
+            {
+                "@type": "WebSite",
+                "@id": f"https://{host}/#website",
+                "publisher": {"@id": publisher["@id"]},
+            },
+            publisher,
+            {
+                "@type": "Person",
+                "@id": author_id,
+                "name": "Erika Mustermann",
+                "url": f"https://{host}/author/erika/",
+            },
+        ],
+    }
+
+
+def organisation(host: str) -> dict[str, Any]:
+    return {"@type": "Organization", "@id": f"https://{host}/#organization", "name": "Example"}
+
+
+def test_yoast_authors_in_the_graph_are_not_personal() -> None:
+    host = "www.zeitung-beispiel.de"
+    news = page(
+        "<p>Eilmeldung: Der Stadtrat tagt.</p>",
+        head=jsonld(yoast_graph(host, "NewsArticle", organisation(host))),
+        lang="de-DE",
+    )
+    result = CLASSIFIER.classify(host, [news])
+    assert (result.category, result.tags) == ("news_media", ())
+    assert not any(e.signal.endswith(".personal") for e in result.evidence)
+
+
+def test_a_shop_with_a_yoast_blog_post_is_not_personal() -> None:
+    host = "shop.example.com"
+    product = page(
+        "<button>Add to cart</button>",
+        head=jsonld({"@type": "Product", "name": "Teacup"}),
+        body_class="woocommerce",
+    )
+    graph = yoast_graph(host, "Article", organisation(host))
+    post = page("<p>How we glaze</p>", head=jsonld(graph))
+    result = CLASSIFIER.classify(host, [product, post])
+    assert (result.category, result.platform) == ("ecommerce", "woocommerce")
+    assert "personal" not in result.tags
+
+
+def test_a_council_with_a_yoast_news_post_is_not_personal() -> None:
+    host = "www.camden.gov.uk"
+    post = page("<p>News</p>", head=jsonld(yoast_graph(host, "Article", organisation(host))))
+    result = CLASSIFIER.classify(host, [post])
+    assert (result.category, result.tags) == ("government", ())
+
+
+def test_a_yoast_blog_published_by_its_author_is_personal() -> None:
+    host = "janedoe.example.net"
+    jane = {
+        "@type": ["Person", "Organization"],
+        "@id": f"https://{host}/#/schema/person/5f3a",
+        "name": "Jane Doe",
+    }
+    blog = page("<h2>About me</h2>", head=jsonld(yoast_graph(host, "Article", jane)))
+    result = CLASSIFIER.classify(host, [blog])
+    assert result.category == "personal"
+    assert ("schema_org.personal", "Person") in {(e.signal, e.value) for e in result.evidence}
+
+
+def test_odd_json_ld_ids_are_ignored_safely() -> None:
+    odd = {
+        "@graph": [
+            {"@type": "Person", "@id": ["not", "a", "string"]},
+            {"@type": "Article", "author": [{"@id": {"nested": 1}}, "Jane", {"@id": 7}]},
+        ]
+    }
+    result = CLASSIFIER.classify("odd.example.net", [page("", head=jsonld(odd))])
+    assert ("schema_org.personal", "Person") in {(e.signal, e.value) for e in result.evidence}
 
 
 def test_a_job_posting_page_is_jobs() -> None:
@@ -423,6 +524,34 @@ def test_only_successful_html_pages_count() -> None:
     blocked = page("<button>Add to cart</button>" * 3, status=403)
     result = CLASSIFIER.classify("www.example.com", [api, blocked])
     assert (result.category, result.evidence, result.language) == (UNCLASSIFIED, (), None)
+
+
+@pytest.mark.parametrize("charset", ["undefined", "idna", "punycode", "base64", "no-such"])
+@pytest.mark.parametrize("declared_in", ["header", "meta"])
+def test_a_bad_declared_charset_falls_back_to_utf8(charset: str, declared_in: str) -> None:
+    body = "<button>Add to cart</button><p>Teetasse 12,50 €</p>"
+    if declared_in == "header":
+        bad = page(body, content_type=f"text/html; charset={charset}")
+    else:
+        bad = page(body, head=f'<meta charset="{charset}">', content_type="text/html")
+    result = CLASSIFIER.classify("shop.example.de", [bad])
+    assert ("text.ecommerce", "add to cart") in {(e.signal, e.value) for e in result.evidence}
+
+
+@pytest.mark.parametrize("run", ["1" * 50_000, "1," * 25_000, "1." * 25_000])
+def test_price_detection_is_linear_on_long_digit_runs(run: str) -> None:
+    # Quadratic backtracking took about 35 s on 50,000 characters; linear takes milliseconds.
+    started = time.perf_counter()
+    assert _PRICE.findall(run) == []
+    facts = page_facts(f"<html><body><pre>{run}</pre></body></html>")
+    assert time.perf_counter() - started < 1.0
+    assert not any(s.kind == "prices" for s in facts.signals)
+
+
+def test_prices_with_a_currency_on_either_side_are_counted() -> None:
+    prices = "£12.99 $5 € 7,50 12,50 € 9.99€ 100 zł 49 kr 1.299,00 eur"
+    assert len(_PRICE.findall(prices)) == 8
+    assert any(s.kind == "prices" for s in page_facts(f"<p>{prices}</p>").signals)
 
 
 def test_broken_json_ld_is_ignored() -> None:

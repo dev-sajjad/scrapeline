@@ -76,7 +76,7 @@ def _rules(category: str, weight: float, *patterns: str, **kw: Any) -> list[Doma
 
 
 _ACADEMIC_CC = (
-    "ae bd be cn cr cy fj id il in ir jp ke kr lk ma mw nz rs th tz ug uk za zm zw"
+    "ae at bd be cn cr cy fj id il in ir jp ke kr lk ma mw nz rs rw th tz ug uk za zm zw"
 ).split()
 _GO_CC = "cr id jp ke kr th tz ug".split()
 _US_LOCALITY = ("ci", "co", "city", "town", "vil", "twp")
@@ -310,6 +310,13 @@ NESTED_ITEM_TYPES = frozenset(
     "Apartment Hotel LodgingBusiness Hostel DiscussionForumPosting SocialMediaPosting Dataset "
     "Course BlogPosting TouristTrip Flight".split()
 )
+# Properties that name the people or bodies behind a piece of content, and the ones that
+# name who stands behind the site itself. A `@graph` member referenced only through the
+# first kind counts as nested, like an inline author.
+ATTRIBUTION_KEYS = frozenset(
+    "author creator contributor editor employee founder reviewedBy translator".split()
+)
+IDENTITY_KEYS = frozenset({"publisher"})
 
 OG_TYPES: dict[str, tuple[str, float]] = {
     "product": ("ecommerce", 0.5),
@@ -457,8 +464,12 @@ _CART_PATH = re.compile(
     r"/(cart|basket|checkout|warenkorb|panier|carrito|carrello|winkelwagen|koszyk|sepet)"
     r"(?:[/?#.]|$)"
 )
+# Linear time on untrusted text: a trailing-currency number starts only where a run of
+# digits, dots and commas starts, and the run is possessive, so a long run of digits
+# with no currency after it fails once instead of backtracking from every position in it.
 _PRICE = re.compile(
-    r"(?:[£$€¥₹₩₽₺]\s?\d[\d.,]*|\d[\d.,]*\s?(?:€|zł|kr|kč|₽|₺|usd|eur|gbp|chf)(?!\w))"
+    r"(?:[£$€¥₹₩₽₺]\s?\d[\d.,]*+"
+    r"|(?<![\d.,])\d[\d.,]*+\s?(?:€|zł|kr|kč|₽|₺|usd|eur|gbp|chf)(?!\w))"
 )
 MIN_PRICES = 8
 _META_CHARSET = re.compile(rb"""<meta[^>]+charset\s*=\s*["']?([a-zA-Z0-9_.:-]+)""", re.I)
@@ -540,7 +551,9 @@ def _decode(page: RawDoc) -> str:
         charset = match.group(1).decode("ascii", "ignore")
     try:
         return page.content.decode(charset or "utf-8", errors="replace")
-    except LookupError:
+    except (LookupError, ValueError):
+        # The page names its own charset. Unknown names, binary codecs ('base64') and codecs
+        # that fail on decode ('undefined', 'idna', 'punycode') all fall back to UTF-8.
         return page.content.decode("utf-8", errors="replace")
 
 
@@ -578,11 +591,8 @@ def _schema_name(raw: object) -> str | None:
     return name if _SCHEMA_NAME.match(name) else None
 
 
-def _jsonld_types(data: object) -> Iterator[tuple[str, bool]]:
-    """(schema.org type, is top level) for every typed object; `@graph` members are top level.
-
-    `nonprofitStatus` is reported as the pseudo type NGO, which is what it declares.
-    """
+def _jsonld_dicts(data: object) -> Iterator[tuple[dict[str, Any], int]]:
+    """Every object in a JSON-LD document with its depth; `@graph` members keep their parent's."""
     stack: list[tuple[object, int]] = [(data, 0)]
     visited = 0
     while stack and visited < _MAX_JSON_NODES:
@@ -590,18 +600,44 @@ def _jsonld_types(data: object) -> Iterator[tuple[str, bool]]:
         visited += 1
         if isinstance(node, list):
             stack.extend((child, depth) for child in node)
-            continue
-        if not isinstance(node, dict):
-            continue
+        elif isinstance(node, dict):
+            yield node, depth
+            for key, value in node.items():
+                if isinstance(value, dict | list):
+                    stack.append((value, depth if key == "@graph" else depth + 1))
+
+
+def _referenced_ids(data: object, keys: frozenset[str]) -> set[str]:
+    """`@id`s that objects point to through one of `keys`, as in `"author": {"@id": ...}`."""
+    ids: set[str] = set()
+    for node, _ in _jsonld_dicts(data):
+        for key in keys.intersection(node):
+            value = node[key]
+            for ref in value if isinstance(value, list) else [value]:
+                if isinstance(ref, dict) and isinstance(ref.get("@id"), str):
+                    ids.add(ref["@id"])
+    return ids
+
+
+def _jsonld_types(data: object) -> Iterator[tuple[str, bool]]:
+    """(schema.org type, is top level) for every typed object; `@graph` members are top level.
+
+    A `@graph` member that other objects only name as an author, editor, employee, ... is
+    nested where it is referenced, the way Yoast and similar plugins write article authors,
+    so it is not top level. It stays top level when something also names it as publisher:
+    then it is the site's own identity, as on a personal blog.
+    `nonprofitStatus` is reported as the pseudo type NGO, which is what it declares.
+    """
+    attributed = _referenced_ids(data, ATTRIBUTION_KEYS) - _referenced_ids(data, IDENTITY_KEYS)
+    for node, depth in _jsonld_dicts(data):
+        node_id = node.get("@id")
+        top_level = depth == 0 and not (isinstance(node_id, str) and node_id in attributed)
         declared = node.get("@type")
         for raw in declared if isinstance(declared, list) else [declared]:
             if (name := _schema_name(raw)) is not None:
-                yield name, depth == 0
+                yield name, top_level
         if "nonprofitStatus" in node:
-            yield "NGO", depth == 0
-        for key, value in node.items():
-            if isinstance(value, dict | list):
-                stack.append((value, depth if key == "@graph" else depth + 1))
+            yield "NGO", top_level
 
 
 def _schema_signals(types: Iterable[tuple[str, bool]], kind: str) -> Iterator[Signal]:
