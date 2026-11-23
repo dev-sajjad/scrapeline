@@ -145,7 +145,8 @@ def test_invalid_instructions_are_refused(old: str, new: str) -> None:
 
 def test_existing_sources_still_load_and_name_their_dataset() -> None:
     sources = load_sources(Path(__file__).resolve().parents[2] / "config/sources")
-    assert sources and all(cfg.dataset_name == "meeting" for cfg in sources.values())
+    legacy = [cfg for cfg in sources.values() if cfg.dataset is None]
+    assert legacy and all(cfg.dataset_name == "meeting" for cfg in legacy)
 
 
 def test_generic_sources_need_no_jurisdiction_but_civic_ones_do() -> None:
