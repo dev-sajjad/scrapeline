@@ -22,15 +22,20 @@ Reading one field: element (`css`, or the record itself) -> attribute or visible
 cleaned -> `pattern` (group 1, else the whole match) -> `map` (exact text -> value; a text
 value still goes through the transform) -> transform -> `default` (also transformed) when
 nothing was read. Transforms: text, url (= absolute_url), date, time, datetime, int, float,
-decimal (= number), money, bool, status; a field without one is read as its dataset type.
+decimal (= number), money, bool, status; a field without one is read as its dataset type
+(`canonical_url` as a url). `transform: date` on a datetime field reads a date-only value as
+the start of that day (local midnight) in the source's timezone; without a timezone it is
+ambiguous. Without that transform, a date with no time in a datetime field is ambiguous.
 Values are read under the source's locale. A value with more than one reading (03/04/2026
-without a date order) turns that record into a reject naming the field and the problem.
+without a date order, a time range, a text with several prices) turns that record into a
+reject naming the field and the problem.
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Iterator
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -61,6 +66,7 @@ from scrapeline.pipeline.normalise import (
     parse_money,
     parse_number,
     parse_time,
+    start_of_day,
 )
 
 if TYPE_CHECKING:
@@ -83,7 +89,9 @@ Transform = Literal[
 ]
 Scalar = str | int | float | bool | None
 
-IDENTITY_FIELDS = frozenset({"external_id", "canonical_url"})
+# Identity fields every spec may set, with the type they are read as.
+IDENTITY_FIELD_TYPES: dict[str, FieldType] = {"external_id": "text", "canonical_url": "url"}
+IDENTITY_FIELDS = frozenset(IDENTITY_FIELD_TYPES)
 # A field without an explicit transform is read as its dataset type.
 _TYPE_TRANSFORMS: dict[FieldType, Transform] = {
     "text": "text",
@@ -102,9 +110,11 @@ _BOOL_WORDS = {
     **dict.fromkeys(("1", "true", "yes", "y", "on"), True),
     **dict.fromkeys(("0", "false", "no", "n", "off"), False),
 }
-# A leading phrase followed by detail: 'In stock (22 available)', 'Sold out - back soon'.
+# A stock phrase alone or followed by detail: 'In stock (22 available)', 'Sold out - back soon'.
+# 'Available soon' and 'Available for pre-order' are not read; a spec can `map` them.
 _BOOL_PHRASE = re.compile(
-    r"(?:(?P<yes>in stock|available|yes)|out of stock|sold out|not available|unavailable|no)\b",
+    r"(?:(?P<yes>in stock|available|yes)|out of stock|sold out|not available|unavailable|no)"
+    r"(?=\s*(?:$|[(\[:;,.!\u2013\u2014-]|\d))",
     re.IGNORECASE,
 )
 _MAX_TEXT_IN_REASON = 80
@@ -330,11 +340,15 @@ def _read(
     return text, result
 
 
+def _field_type(name: str, dataset: DatasetType) -> FieldType:
+    field = dataset.fields.get(name)
+    return field.type if field is not None else IDENTITY_FIELD_TYPES.get(name, "text")
+
+
 def _transform_for(name: str, spec: FieldSpec, dataset: DatasetType) -> Transform:
     if spec.transform is not None:
         return spec.transform
-    field = dataset.fields.get(name)
-    return _TYPE_TRANSFORMS[field.type] if field is not None else "text"
+    return _TYPE_TRANSFORMS[_field_type(name, dataset)]
 
 
 def _short(text: str) -> str:
@@ -357,6 +371,12 @@ def parse_html(
     dataset = resolve_dataset(spec.schema_, dataset)
     model = dataset.record_model()
     transforms = {name: _transform_for(name, f, dataset) for name, f in spec.fields.items()}
+    # Datetime fields the spec reads as a date on purpose: stored as the start of that day.
+    day_starts = {
+        name
+        for name in spec.fields
+        if transforms[name] == "date" and _field_type(name, dataset) == "datetime"
+    }
     tree = HTMLParser(raw.text)
     base = raw.final_url
     result = ParseResult()
@@ -372,7 +392,10 @@ def parse_html(
         ambiguous: list[str] = []
         for name, f in spec.fields.items():
             try:
-                texts[name], data[name] = _read(node, f, transforms[name], base, locale)
+                texts[name], value = _read(node, f, transforms[name], base, locale)
+                if name in day_starts and isinstance(value, date):
+                    value = start_of_day(value, locale=locale)
+                data[name] = value
             except AmbiguousValueError as exc:
                 texts[name], data[name] = None, None
                 ambiguous.append(f"{name}: {exc}")

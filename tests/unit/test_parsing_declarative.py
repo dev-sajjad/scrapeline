@@ -121,6 +121,24 @@ fields:
 """
 
 
+ARTICLE_PAGE = """
+<ul>
+<li><a href="/news/1">Budget agreed</a><time>25 November 2026</time></li>
+<li><a href="/news/2">Summer fair</a><time>1 July 2026</time></li>
+</ul>
+"""
+
+# published_at is a datetime field; the page shows only dates.
+ARTICLE_SPEC = """
+schema: article
+record: li
+fields:
+  url:          {css: a, attr: href}
+  title:        {css: a}
+  published_at: {css: time, transform: date}
+"""
+
+
 def raw(html: str, url: str = BASE, source_id: str = "t") -> RawDoc:
     content = html.encode()
     return RawDoc(
@@ -206,6 +224,61 @@ def test_user_defined_dataset_end_to_end_through_parse_html() -> None:
     dumped = first.model_dump(mode="json")
     assert dumped["rent"] == {"amount": "1250.00", "currency": "EUR"}
     assert dumped["listed_at"] == "2026-11-24T17:30:00Z"
+
+
+def test_date_transform_on_a_datetime_field_reads_the_start_of_the_day() -> None:
+    spec = SiteSpec.from_yaml(ARTICLE_SPEC)
+    page = raw(ARTICLE_PAGE, "https://news.example/")
+    result = parse_html(spec, page, locale=UK)
+    assert not result.rejects
+    assert {r.title: r.published_at for r in result.records} == {
+        "Budget agreed": datetime(2026, 11, 25, tzinfo=UTC),  # GMT
+        "Summer fair": datetime(2026, 6, 30, 23, tzinfo=UTC),  # BST midnight
+    }
+    no_zone = parse_html(spec, page, locale=Locale(date_order="dmy"))
+    assert not no_zone.records and len(no_zone.rejects) == 2
+    assert all("locale.timezone" in r.reason for r in no_zone.rejects)
+    inferred = SiteSpec.from_yaml(ARTICLE_SPEC.replace(", transform: date", ""))
+    implicit = parse_html(inferred, page, locale=UK)
+    assert not implicit.records and "no time of day" in implicit.rejects[0].reason
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("In stock", True),
+        ("In stock (22 available)", True),
+        ("Available", True),
+        ("Available: 3", True),
+        ("Sold out - back soon", False),
+        ("Out of stock.", False),
+        ("Unavailable", False),
+        ("Available soon", None),
+        ("Available for pre-order", None),
+        ("No longer available", None),
+    ],
+)
+def test_stock_phrases_are_read_only_when_they_state_stock(
+    text: str, expected: bool | None
+) -> None:
+    spec = SiteSpec.from_yaml(
+        "schema: product\nrecord: li\nfields:\n  url: {css: a, attr: href}\n"
+        "  title: {css: a}\n  in_stock: {css: span, optional: true}\n"
+    )
+    page = f"<ul><li><a href='p/1'>Pen</a><span>{text}</span></li></ul>"
+    [record] = parse_html(spec, raw(page), locale=UK).records
+    assert record.in_stock is expected
+
+
+def test_canonical_url_is_read_as_a_url() -> None:
+    spec = SiteSpec.from_yaml(
+        "schema: product\nrecord: li\nfields:\n  url: {css: a.p, attr: href}\n"
+        "  title: {css: a.p}\n  canonical_url: {css: a.c, attr: href}\n"
+    )
+    page = "<ul><li><a class=p href='p/1?ref=list'>Pen</a><a class=c href='/p/1'>c</a></li></ul>"
+    [record] = parse_html(spec, raw(page), locale=UK).records
+    assert record.canonical_url == "https://shop.example/p/1"
+    assert record.url == BASE + "p/1?ref=list"
 
 
 def test_spec_validation_follows_the_dataset() -> None:

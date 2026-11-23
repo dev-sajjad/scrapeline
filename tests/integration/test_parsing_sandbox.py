@@ -15,6 +15,8 @@ from scrapeline.catalog.datasets import DatasetType
 from scrapeline.pipeline.locale import Locale
 from scrapeline.settings import Settings
 from tests.unit.test_parsing_declarative import (
+    ARTICLE_PAGE,
+    ARTICLE_SPEC,
     DE,
     LISTING,
     LISTING_PAGE,
@@ -39,8 +41,9 @@ PRODUCT_PAGES = {
     [
         (PRODUCT_SPEC, PRODUCT_PAGES, UK, None, 6),
         (LISTING_SPEC, {"index.html": LISTING_PAGE}, DE, LISTING, 2),
+        (ARTICLE_SPEC, {"index.html": ARTICLE_PAGE}, UK, None, 2),
     ],
-    ids=["product", "user-dataset"],
+    ids=["product", "user-dataset", "date-only-datetime"],
 )
 def test_generic_spec_in_docker_sandbox_matches_local(
     tmp_path: Path,
@@ -65,11 +68,21 @@ def test_generic_spec_in_docker_sandbox_matches_local(
     assert docker.golden["checks"] == local.golden["checks"]
 
 
-def test_docker_sandbox_rejects_ambiguous_values_like_local(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("page", "records", "rejects"),
+    [
+        (PRODUCT_PAGE, 2, 1),  # '$' under a GBP source
+        (PRODUCT_PAGE.replace("£53.74", "Was £60.00 Now £53.74"), 1, 2),  # two prices
+    ],
+    ids=["shared-symbol", "several-amounts"],
+)
+def test_docker_sandbox_rejects_ambiguous_values_like_local(
+    tmp_path: Path, page: str, records: int, rejects: int
+) -> None:
     settings = Settings(_env_file=None)
-    pages_dir = write_pages(tmp_path / "pages", {"index.html": PRODUCT_PAGE})
+    pages_dir = write_pages(tmp_path / "pages", {"index.html": page})
     spec = PRODUCT_SPEC.replace("next_page", "# next_page")
     docker = evaluate_spec(spec, pages_dir, None, settings, mode="docker", locale=UK)
     local = evaluate_spec(spec, pages_dir, None, settings, mode="local", locale=UK)
-    assert (docker.records, docker.rejects) == (local.records, local.rejects) == (2, 1)
+    assert (docker.records, docker.rejects) == (local.records, local.rejects) == (records, rejects)
     assert not docker.passed
