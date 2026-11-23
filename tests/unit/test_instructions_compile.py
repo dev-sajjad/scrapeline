@@ -371,6 +371,19 @@ def test_site_dir_follows_the_runtime_spec_path() -> None:
     assert any("adapters/sites/shop_a/spec.yaml" in s for s in compiled.next_steps)
 
 
+def test_generator_is_suggested_only_for_datasets_it_can_write() -> None:
+    meeting = compile_yaml("dataset: meeting\n")
+    assert meeting.generator_supported
+    assert any("scrapeline agent generate" in s for s in meeting.next_steps)
+    assert "generator agent" in meeting.spec_skeleton.splitlines()[1]
+    for extra in ("dataset: product\n", "fields: {url: {type: url, key: true}}\n", ""):
+        compiled = compile_yaml(extra)
+        assert not compiled.generator_supported
+        steps = " ".join(compiled.next_steps)
+        assert "scrapeline agent generate" not in steps and "by hand" in steps
+        assert "generator" not in compiled.spec_skeleton.split("spec_version")[0]
+
+
 @pytest.mark.parametrize("path", sorted((ROOT / "config/instructions").glob("*.yaml")))
 def test_example_instructions_compile(path: Path) -> None:
     compiled = compile_instruction(ScrapeInstruction.from_yaml(path.read_text()), REGISTRY)

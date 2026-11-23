@@ -1,6 +1,6 @@
 # Scrape instructions
 
-A scrape instruction is a small YAML file that says **what** you want collected from a website, in your own words. scrapeline works out **how**: it compiles the instruction into a draft source, picks or defines the dataset type the records must match, and writes a site adapter skeleton for a human or the generator agent to complete.
+A scrape instruction is a small YAML file that says **what** you want collected from a website, in your own words. scrapeline works out **how**: it compiles the instruction into a draft source, picks or defines the dataset type the records must match, and writes a site adapter skeleton for a human (or, for meetings, the generator agent) to complete.
 
 Nothing runs on its own. A compiled source starts as `draft` and stays there until a human has approved the dataset type, completed the adapter, reviewed the site's terms and robots.txt, and activated it.
 
@@ -70,7 +70,7 @@ How `dataset` and `fields` combine:
 - **Existing dataset with `fields`**: only those fields are collected (types must match). The key and required fields of the dataset must be included. The rest are listed in the source as `fields_excluded`. New fields need a new dataset type or a new version.
 - **New dataset name with `fields`**: the fields define a new dataset type (pack `user`, version 1) with at least one key field. It is written to `config/datasets/<name>.yaml` and must be approved by a human.
 - **`fields` without `dataset`**: as above, named after the source id (`books-catalogue` becomes `books_catalogue`).
-- **Neither**: a dataset type has to be proposed first (by hand or from the generator agent) and approved. `apply` still writes the draft source so sample pages can be captured.
+- **Neither**: a dataset type has to be proposed first (by hand for now) and approved. `apply` still writes the draft source so sample pages can be captured.
 
 ### Personal data
 
@@ -93,12 +93,15 @@ Because `-` becomes `_`, ids such as `shop-a` and `shop_a` share one adapter dir
 `validate` and `apply` print these steps for the instruction at hand:
 
 1. **Approve the dataset type** if it is new (or propose one if none was given): check field types, key fields and personal-data flags.
-2. **Complete the adapter**: fill the `TODO` selectors in `spec.yaml` by hand, or capture sample pages and run the generator agent. Add `--render` when the instruction has `crawl.render: always`; without it the samples hold the page before JavaScript has filled in the records.
+2. **Complete the adapter**: capture sample pages, then fill the `TODO` selectors in `spec.yaml` by hand. Add `--render` when the instruction has `crawl.render: always`; without it the samples hold the page before JavaScript has filled in the records.
    ```sh
    scrapeline capture <id>            # or: scrapeline capture <id> --render
+   ```
+   For the `meeting` dataset you can let the generator agent write the spec instead:
+   ```sh
    scrapeline agent generate --instruction my-instruction.yaml --pages data/samples/<id>
    ```
-   The agent works offline on the captured pages and the deterministic tester checks its spec. With `--apply`, a passing spec and the draft source are committed on an `agent/*` branch for a human to review and merge (a new dataset type must be applied and approved first).
+   The agent works offline on the captured pages and the deterministic tester checks its spec. With `--apply`, a passing spec and the draft source are committed on an `agent/*` branch for a human to review and merge. The generator still starts from a Meeting skeleton, so it refuses every other dataset type (built-in or new) until it works from the dataset registry; write those specs by hand.
 3. **Review the site's terms of use and robots.txt.** Record the review date in `legal.terms_checked` and why collecting is allowed in `legal.notes`. Prefer an official API when the site has one.
 4. **Draft live run**: `scrapeline run <id>` (it registers the source in the database as `draft`). Check the rows and the quality checks.
 5. **Activate**: `scrapeline source set-status <id> active`. From then on the scheduler runs it on its schedule (never for `manual`).

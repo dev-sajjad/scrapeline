@@ -9,8 +9,11 @@ import pytest
 import yaml
 from typer.testing import CliRunner, Result
 
+from scrapeline.agents.generator import SKELETON
+from scrapeline.catalog.datasets import default_registry
 from scrapeline.cli import app
 from scrapeline.registry.config import SourceConfig
+from scrapeline.registry.instruction import GENERATOR_DATASETS
 
 ROOT = Path(__file__).resolve().parents[2]
 BOOKS = ROOT / "config/instructions/books-toscrape.yaml"
@@ -67,16 +70,17 @@ def meetings(tmp_path: Path, source_id: str = "city-hall") -> Path:
 def test_instruction_file_builds_the_draft_source(
     tmp_path: Path, calls: list[dict[str, Any]]
 ) -> None:
-    result = generate(tmp_path, "--instruction", BOOKS, "--apply")
+    result = generate(tmp_path, "--instruction", meetings(tmp_path), "--apply")
     assert result.exit_code == 0, result.output
     call = calls[0]
-    assert call["source_id"] == "books-toscrape" and call["apply"] is True
-    assert call["instruction"].startswith("Every book in the catalogue")
-    assert "Fields to extract: url, title, price" in call["instruction"]
+    assert call["source_id"] == "city-hall" and call["apply"] is True
+    assert call["instruction"].startswith("Every council meeting")
+    assert "Dataset type: meeting. Fields to extract: " in call["instruction"]
     cfg = source_of(call)
-    assert (cfg.id, cfg.dataset, cfg.status, cfg.owner) == (
-        "books-toscrape",
-        "product",
+    assert (cfg.id, cfg.dataset, cfg.schema_, cfg.status, cfg.owner) == (
+        "city-hall",
+        "meeting",
+        "Meeting",
         "draft",
         "agent",
     )
@@ -85,8 +89,24 @@ def test_instruction_file_builds_the_draft_source(
 def test_instruction_file_without_apply_writes_no_source(
     tmp_path: Path, calls: list[dict[str, Any]]
 ) -> None:
-    assert generate(tmp_path, "books-toscrape", "--instruction", BOOKS).exit_code == 0
+    assert generate(tmp_path, "city-hall", "--instruction", meetings(tmp_path)).exit_code == 0
     assert calls[0]["source_yaml"] is None and calls[0]["apply"] is False
+
+
+@pytest.mark.parametrize("apply", [False, True])
+def test_datasets_the_generator_cannot_write_are_refused_before_it_runs(
+    tmp_path: Path, calls: list[dict[str, Any]], apply: bool
+) -> None:
+    # The generator only writes Meeting specs; a product spec would fail every paid attempt.
+    result = generate(tmp_path, "--instruction", BOOKS, *(["--apply"] if apply else []))
+    assert result.exit_code != 0 and calls == []
+    assert "writes only meeting specs" in said(result)
+    assert "scrapeline instruction apply" in said(result)
+
+
+def test_generator_datasets_match_the_generator_skeleton() -> None:
+    schema = yaml.safe_load(SKELETON)["schema"]
+    assert GENERATOR_DATASETS == {default_registry().canonical_name(schema)}
 
 
 def test_apply_refuses_a_site_dir_used_by_another_source(
@@ -126,7 +146,7 @@ def test_conflicting_or_missing_arguments_are_refused(
     assert calls == []
 
 
-def test_apply_waits_for_a_new_dataset_type_to_be_approved(
+def test_new_dataset_types_are_never_generated_or_committed(
     tmp_path: Path, calls: list[dict[str, Any]]
 ) -> None:
     file = tmp_path / "new.yaml"
@@ -135,11 +155,10 @@ def test_apply_waits_for_a_new_dataset_type_to_be_approved(
         "collect: Every book with link and title\nusage: {purpose: Demo}\n"
         "fields: {url: {type: url, key: true}, title: text}\n"
     )
-    result = generate(tmp_path, "--instruction", file, "--apply")
-    assert result.exit_code != 0 and "instruction apply" in result.output
+    for extra in (["--apply"], []):
+        result = generate(tmp_path, "--instruction", file, *extra)
+        assert result.exit_code != 0 and "scrapeline instruction apply" in said(result)
     assert calls == []
-    assert generate(tmp_path, "--instruction", file).exit_code == 0
-    assert calls[0]["source_id"] == "shelf-watch"
 
 
 def test_free_text_flags_still_build_a_meeting_draft(

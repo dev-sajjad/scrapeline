@@ -122,7 +122,11 @@ def _compile_for_agent(path: Path, source_id: str | None, apply: bool) -> Compil
     from scrapeline.adapters.declarative import spec_path_for
     from scrapeline.catalog.datasets import default_registry
     from scrapeline.cli.instructions import site_dir_conflict
-    from scrapeline.registry.instruction import ScrapeInstruction, compile_instruction
+    from scrapeline.registry.instruction import (
+        GENERATOR_DATASETS,
+        ScrapeInstruction,
+        compile_instruction,
+    )
     from scrapeline.settings import get_settings
 
     registry = default_registry()
@@ -134,11 +138,15 @@ def _compile_for_agent(path: Path, source_id: str | None, apply: bool) -> Compil
         raise typer.BadParameter(
             f"SOURCE_ID {source_id!r} differs from the instruction's id {compiled.source.id!r}"
         )
-    # The agent branch carries the source and spec only; a new dataset type is reviewed first.
-    if apply and (compiled.dataset_is_new or compiled.needs_dataset_proposal):
+    # The generator starts from a Meeting skeleton and its tools validate Meeting specs, so
+    # any other dataset would burn paid attempts on a spec that cannot pass. A new or proposed
+    # dataset type is never supported, so it is also never committed before its approval.
+    if not compiled.generator_supported:
         raise typer.BadParameter(
-            f"dataset type {compiled.source.dataset_name!r} is not approved yet; run "
-            f"`scrapeline instruction apply {path}` and have it reviewed first"
+            f"the generator agent writes only {', '.join(sorted(GENERATOR_DATASETS))} specs "
+            f"for now, not {compiled.source.dataset_name!r}. Run `scrapeline instruction apply "
+            f"{path}` and fill the spec.yaml skeleton by hand, or wait until the generator "
+            "works from the dataset registry"
         )
     if apply:
         spec = spec_path_for(compiled.source.id)

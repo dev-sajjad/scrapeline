@@ -215,6 +215,17 @@ def site_dir_name(source_id: str) -> str:
     return spec_path_for(source_id).parent.name
 
 
+# Dataset types the generator agent can write specs for today: it starts from a Meeting
+# skeleton and its tools check specs against the typed civic models. Widen this once it
+# works from the dataset registry.
+GENERATOR_DATASETS = frozenset({"meeting"})
+
+
+def generator_supports(dataset: DatasetType | None) -> bool:
+    """Whether the generator agent can write a spec for records of `dataset`."""
+    return dataset is not None and dataset.storage == "typed" and dataset.name in GENERATOR_DATASETS
+
+
 DECLARATIVE_ADAPTER = "scrapeline.adapters.declarative:DeclarativeAdapter"
 # A date no real review has: it marks `legal.terms_checked` as "not reviewed yet".
 UNREVIEWED_TERMS = date(1970, 1, 1)
@@ -264,6 +275,11 @@ class CompiledInstruction:
     def site_dir(self) -> str:
         """Directory name of the site adapter under adapters/sites/."""
         return site_dir_name(self.source.id)
+
+    @property
+    def generator_supported(self) -> bool:
+        """Whether the generator agent can write this source's spec today."""
+        return generator_supports(self.dataset_type)
 
     @property
     def personal_data_fields(self) -> tuple[str, ...]:
@@ -372,7 +388,9 @@ def compile_instruction(ins: ScrapeInstruction, registry: DatasetRegistry) -> Co
         dataset_type=dataset,
         dataset_is_new=is_new,
         fields=tuple(wanted),
-        spec_skeleton=_spec_skeleton(ins, dataset_name, wanted, pagination),
+        spec_skeleton=_spec_skeleton(
+            ins, dataset_name, wanted, pagination, generator_supports(dataset)
+        ),
         next_steps=tuple(_next_steps(ins, source, dataset, is_new, wanted, typed)),
     )
 
@@ -474,7 +492,11 @@ def _field_placeholder(name: str, f: FieldDef) -> dict[str, Any]:
 
 
 def _spec_skeleton(
-    ins: ScrapeInstruction, schema: str, fields: dict[str, FieldDef], pagination: Pagination
+    ins: ScrapeInstruction,
+    schema: str,
+    fields: dict[str, FieldDef],
+    pagination: Pagination,
+    by_generator: bool,
 ) -> str:
     spec: dict[str, Any] = {
         "spec_version": 1,
@@ -489,9 +511,9 @@ def _spec_skeleton(
         if pagination == "load-more":
             render["click_until_gone"] = "TODO: CSS selector for the load-more button"
         spec["render"] = render
-    header = (
-        f"# Site adapter skeleton for {ins.source_id}. Replace every TODO selector by hand,\n"
-        "# or run the generator agent on captured sample pages.\n"
+    header = f"# Site adapter skeleton for {ins.source_id}. Replace every TODO selector by hand"
+    header += (
+        ",\n# or run the generator agent on captured sample pages.\n" if by_generator else ".\n"
     )
     # Flow style and a wide line keep one field per line, like hand-written specs.
     body = yaml.safe_dump(
@@ -518,7 +540,7 @@ def _next_steps(
         steps += [
             f"Capture sample pages: {capture}.",
             f"A dataset type must be proposed: define '{name}' in config/datasets/{name}.yaml "
-            "(by hand or from the generator agent's proposal) and have a human approve it.",
+            "by hand and have a human approve it.",
             f"Then add `dataset: {name}` and its `fields` to the instruction and apply it "
             "again with --force.",
         ]
@@ -532,11 +554,18 @@ def _next_steps(
         steps.append(
             "Fill in the jurisdiction block of the source config (placeholder xx-unknown)."
         )
-    steps.append(
-        f"Fill the TODO selectors in {spec} by hand, or capture sample pages "
-        f"({capture}) and run the generator agent: scrapeline agent generate "
-        f"--instruction <instruction file> --pages data/samples/{sid}."
-    )
+    if generator_supports(dataset):
+        steps.append(
+            f"Fill the TODO selectors in {spec} by hand, or capture sample pages "
+            f"({capture}) and run the generator agent: scrapeline agent generate "
+            f"--instruction <instruction file> --pages data/samples/{sid}."
+        )
+    else:
+        steps.append(
+            f"Fill the TODO selectors in {spec} by hand from sample pages ({capture}). "
+            f"The generator agent writes only {', '.join(sorted(GENERATOR_DATASETS))} specs "
+            "until it works from the dataset registry."
+        )
     if ins.crawl.pagination == "auto":
         steps.append(
             "Pagination 'auto' was compiled as next-link: point next_page at the next-page "
