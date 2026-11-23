@@ -1,7 +1,7 @@
 """Deterministic tester (no LLM). The only judge of agent output.
 
-Stages: (1) static: spec schema validation / AST security check for python;
-(2) sandbox: parse sample pages offline (`docker run --network none ...`);
+Stages: (1) static: spec schema validation, field pattern safety, AST security check for
+python; (2) sandbox: parse sample pages offline (`docker run --network none ...`);
 (3) golden: compare records with human-owned expected rows. Output: machine-readable report.
 
 The sandbox reads the pages under the source's locale and receives the dataset definition,
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -34,6 +35,9 @@ SandboxMode = Literal["docker", "local"]
 PAGE_URL_PREFIX = "/static-list/"  # drift cases keep the original URL layout
 CASE_SOURCE_ID = "fixture-static-list"  # benchmark pages are copies of this fixture site
 EXCLUDED_FIELDS = frozenset({"attendees", "contact_email", "phone", "signatures"})
+# Field patterns run on untrusted page text in the trusted worker, where no time limit applies.
+MAX_PATTERN_CHARS = 200
+_QUANTIFIER = re.compile(r"(?:[*+?]|\{\d*(?:,\d*)?\})[?+]?")
 
 ALLOWED_IMPORTS = frozenset(
     {
@@ -152,6 +156,78 @@ def security_check_python(code: str) -> list[str]:
     return findings
 
 
+def _repeats(quantifier: str) -> bool:
+    """True for a quantifier that allows more than one repetition ('+', '*', '{2,}')."""
+    if quantifier[0] in "*+":
+        return True
+    if quantifier[0] == "?":
+        return False
+    low, comma, high = quantifier[1 : quantifier.index("}")].partition(",")
+    if not comma:
+        return int(low or 0) > 1
+    return not high or int(high) > 1
+
+
+def _class_end(pattern: str, start: int) -> int:
+    """Index just after the character class that opens at `start`."""
+    i = start + 1
+    if pattern.startswith("^", i):
+        i += 1
+    if pattern.startswith("]", i):
+        i += 1
+    while i < len(pattern) and pattern[i] != "]":
+        i += 2 if pattern[i] == "\\" else 1
+    return i + 1
+
+
+def has_nested_quantifier(pattern: str) -> bool:
+    """A repeated group that contains a repeat: '(a+)+', '(.*)*', '(\\w+\\s?)+$'.
+
+    These backtrack exponentially on text that almost matches. The scan is deliberately
+    simple and also refuses some safe patterns such as '(?:\\d+,)*'.
+    """
+    open_groups: list[bool] = []  # per open group: whether it contains a repeat
+    i = 0
+    while i < len(pattern):
+        char = pattern[i]
+        group_repeats = False
+        if char == "\\":
+            i += 2
+        elif char == "[":
+            i = _class_end(pattern, i)
+        elif char == "(":
+            open_groups.append(False)
+            i += 1
+            continue
+        elif char == ")":
+            group_repeats = open_groups.pop() if open_groups else False
+            if open_groups:
+                open_groups[-1] = open_groups[-1] or group_repeats
+            i += 1
+        else:
+            i += 1
+        quantifier = _QUANTIFIER.match(pattern, i)
+        if quantifier is None:
+            continue
+        if _repeats(quantifier.group()):
+            if group_repeats:
+                return True
+            if open_groups:
+                open_groups[-1] = True
+        i = quantifier.end()
+    return False
+
+
+def pattern_problems(pattern: str) -> list[str]:
+    """Why a field `pattern` is unsafe to run on untrusted text without a time limit."""
+    problems = []
+    if len(pattern) > MAX_PATTERN_CHARS:
+        problems.append(f"pattern longer than {MAX_PATTERN_CHARS} characters")
+    if has_nested_quantifier(pattern):
+        problems.append(f"pattern {pattern[:80]!r} repeats a group that repeats (backtracking)")
+    return problems
+
+
 def case_source(settings: Settings, source_id: str | None) -> SourceConfig | None:
     """Config of the source under test; unknown or new sources fall back to the case source."""
     for candidate in (source_id, CASE_SOURCE_ID):
@@ -172,6 +248,9 @@ def _spec_security(
         dataset = resolve_dataset(spec.schema_, dataset)
     except ConfigError as exc:
         return [str(exc)[:500]]
+    for name, field_spec in spec.fields.items():
+        if field_spec.pattern is not None:
+            findings += [f"{name}: {p}" for p in pattern_problems(field_spec.pattern)]
     leaked = EXCLUDED_FIELDS & set(spec.fields)
     if leaked:
         findings.append(f"excluded personal-data fields requested: {sorted(leaked)}")
