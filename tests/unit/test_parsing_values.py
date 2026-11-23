@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -16,6 +17,7 @@ from scrapeline.pipeline.normalise import (
     parse_money,
     parse_number,
     parse_time,
+    start_of_day,
 )
 from scrapeline.pipeline.values import Money
 
@@ -30,6 +32,7 @@ DE = Locale(
     decimal_separator=",",
 )
 JP = Locale(language="ja-JP", timezone="Asia/Tokyo", date_order="ymd", currency="JPY")
+NY = Locale(language="en-US", timezone="America/New_York", date_order="mdy", currency="USD")
 AMBIGUOUS = "ambiguous"
 
 
@@ -45,6 +48,8 @@ AMBIGUOUS = "ambiguous"
         ("12-01-2026", AMBIGUOUS, date(2026, 12, 1), date(2026, 1, 12)),
         ("03/03/2026", date(2026, 3, 3), date(2026, 3, 3), date(2026, 3, 3)),
         ("11/25/26", date(2026, 11, 25), date(2026, 11, 25), None),
+        ("26/11/25", AMBIGUOUS, None, date(2025, 11, 26)),  # also yy/mm/dd 2026-11-25
+        ("13/11/12", AMBIGUOUS, None, date(2012, 11, 13)),
         ("31/02/2026", None, None, None),
         ("Tue, Nov 25th 2026", date(2026, 11, 25), date(2026, 11, 25), date(2026, 11, 25)),
         ("Tuesday, November 25, 2026", date(2026, 11, 25), date(2026, 11, 25), date(2026, 11, 25)),
@@ -70,6 +75,11 @@ def test_date_ambiguity_matrix(text: str, strict: object, mdy: object, dmy: obje
 def test_ambiguous_date_names_both_readings() -> None:
     with pytest.raises(AmbiguousValueError, match="03 April 2026 or 04 March 2026"):
         parse_date("03/04/2026", locale=STRICT)
+
+
+def test_two_digit_year_dates_name_the_year_first_reading() -> None:
+    with pytest.raises(AmbiguousValueError, match="26 November 2025 or 25 November 2026"):
+        parse_date("26/11/25", locale=STRICT)
 
 
 def test_date_order_ymd_reads_short_years_first() -> None:
@@ -153,6 +163,82 @@ def test_datetimes_that_need_a_guess_are_ambiguous(locale: Locale, text: str, me
         parse_datetime(text, locale=locale)
 
 
+@pytest.mark.parametrize(
+    ("locale", "text"),
+    [
+        (DE, "25.11.2026 18:00-20:00"),
+        (UK, "25/11/2026 09:00-17:00"),
+        (US, "2026-11-25 10:00-12:00"),
+        (US, "11/25/2026 10:00-11:30"),
+        (US, "Nov 25, 2026 7:00 PM - 9:00 PM"),
+        (US, "Nov 25, 2026, 7:00 - 9:00 PM"),
+        (US, "Nov 25, 2026 7-9 PM"),
+        (DE, "25.11.2026, 18:00 bis 20:00 Uhr"),
+    ],
+)
+def test_time_ranges_are_ambiguous_not_read_as_offsets(locale: Locale, text: str) -> None:
+    with pytest.raises(AmbiguousValueError, match="time range"):
+        parse_datetime(text, locale=locale)
+    assert parse_date(text, locale=locale) == date(2026, 11, 25)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("2026-11-25T10:00-12:00", datetime(2026, 11, 25, 22, tzinfo=UTC)),  # ISO 'T' offset
+        ("2026-11-25 10:00:00-05:00", datetime(2026, 11, 25, 15, tzinfo=UTC)),  # with seconds
+        ("2026-11-25 10:00+01:00", datetime(2026, 11, 25, 9, tzinfo=UTC)),  # '+' is no range
+        ("Nov 25, 2026 7:00 PM -0500", datetime(2026, 11, 26, 0, tzinfo=UTC)),
+        ("11/25/2026 - 7:00 PM", datetime(2026, 11, 26, 3, tzinfo=UTC)),  # one time, no range
+        ("2026-11-25T10:00-20:00", None),  # no zone is 20 hours behind UTC
+        ("Nov 25, 2026 10:00 UTC-20", None),
+    ],
+)
+def test_real_offsets_are_kept_and_impossible_ones_refused(
+    text: str, expected: datetime | None
+) -> None:
+    assert parse_datetime(text, locale=US) == expected
+
+
+@pytest.mark.parametrize(
+    ("locale", "text", "expected_utc"),
+    [
+        (NY, "Nov 25, 2026 7:00 PM ET", datetime(2026, 11, 26, 0, tzinfo=UTC)),  # EST
+        (NY, "Jul 1, 2026 7:00 PM ET", datetime(2026, 7, 1, 23, tzinfo=UTC)),  # EDT
+        (
+            Locale(timezone="America/Chicago"),
+            "2026-11-25 7:00 PM CT",
+            datetime(2026, 11, 26, 1, tzinfo=UTC),
+        ),
+        (US, "Nov 25, 2026 7:00 PM PT", datetime(2026, 11, 26, 3, tzinfo=UTC)),
+    ],
+)
+def test_generic_north_american_zone_names(
+    locale: Locale, text: str, expected_utc: datetime
+) -> None:
+    assert parse_datetime(text, locale=locale) == expected_utc
+
+
+def test_generic_zone_names_still_have_to_fit_the_source() -> None:
+    with pytest.raises(AmbiguousValueError, match="PT is not in use"):
+        parse_datetime("Nov 25, 2026 7:00 PM PT", locale=NY)
+    with pytest.raises(AmbiguousValueError, match="occurs twice"):
+        parse_datetime("Nov 1, 2026 1:30 AM ET", locale=NY)  # both EDT and EST
+
+
+def test_start_of_day_is_local_midnight_as_utc() -> None:
+    assert start_of_day(date(2026, 11, 25), locale=UK) == datetime(2026, 11, 25, tzinfo=UTC)
+    assert start_of_day(date(2026, 7, 1), locale=UK) == datetime(2026, 6, 30, 23, tzinfo=UTC)
+    # Chile starts DST at midnight, so 6 September 2026 begins at 01:00 local time.
+    santiago = Locale(timezone="America/Santiago")
+    start = start_of_day(date(2026, 9, 6), locale=santiago)
+    zone = ZoneInfo("America/Santiago")
+    assert start.astimezone(zone).date() == date(2026, 9, 6)
+    assert (start - timedelta(seconds=1)).astimezone(zone).date() == date(2026, 9, 5)
+    with pytest.raises(AmbiguousValueError, match=r"locale\.timezone"):
+        start_of_day(date(2026, 11, 25), locale=STRICT)
+
+
 def test_datetime_objects_and_unreadable_text() -> None:
     aware = datetime(2026, 11, 25, 18, tzinfo=timezone(timedelta(hours=9)))
     assert parse_datetime(aware, locale=STRICT) == datetime(2026, 11, 25, 9, tzinfo=UTC)
@@ -195,6 +281,9 @@ def test_legistar_helpers_keep_working() -> None:
         (UK, "51.77", "51.77", "GBP"),  # no marker: the locale's currency
         (UK, "Was £60.00", "60.00", "GBP"),
         (STRICT, "-£5.00", "-5.00", "GBP"),
+        (UK, "Save 20% £15.99", "15.99", "GBP"),  # a percentage is not an amount
+        (UK, "BLUE PEN 2.99", "2.99", "GBP"),  # 'PEN' is part of the name here
+        (STRICT, "Price in USD: 12.99", "12.99", "USD"),
     ],
 )
 def test_money_formats_across_locales(
@@ -213,6 +302,14 @@ def test_money_formats_across_locales(
         (STRICT, "51.77", "names no currency"),
         (UK, "1.234,56 €", "decimal separator"),  # comma-decimal text under a '.' locale
         (DE, "£51.77", "decimal separator"),
+        (STRICT, "BLUE PEN 2.99", "names no currency"),
+        (UK, "USD 12.00", "names USD but the source's currency is GBP"),
+        (UK, "Was £60.00 Now £45.00", "several amounts"),
+        (UK, "2 for £5", "several amounts"),
+        (UK, "£5.00 (£1.25 each)", "several amounts"),
+        (UK, "12.99 (was 15.99)", "several amounts"),
+        (US, "SKU-123 $10", "several amounts"),
+        (US, "3 for $10", "several amounts"),
     ],
 )
 def test_money_that_needs_a_guess_is_ambiguous(locale: Locale, text: str, message: str) -> None:
