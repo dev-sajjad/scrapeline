@@ -18,6 +18,7 @@ from sqlalchemy import Connection, Table, bindparam, select, update
 
 from scrapeline.pipeline.identity import content_hash
 from scrapeline.pipeline.models import Record
+from scrapeline.registry.config import UsageRights
 from scrapeline.store import tables as t
 
 TABLE_FOR: dict[str, Table] = {
@@ -47,11 +48,15 @@ class LoadStats:
 
 @dataclass
 class LoadContext:
+    """Who is loading and when. `run_started_at` dates removals; `usage` gates personal data."""
+
     source_id: str
     jurisdiction_id: str | None
     run_id: uuid.UUID
     scraper_version_id: int | None
     now: datetime = field(default_factory=lambda: datetime.now(UTC))
+    run_started_at: datetime | None = None
+    usage: UsageRights = field(default_factory=UsageRights)
 
 
 def _content_columns(record: Record, table: Table) -> dict[str, Any]:
