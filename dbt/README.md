@@ -31,7 +31,11 @@ LAKE_DIR=/tmp/lake uv run --extra analytics dbt build --project-dir dbt --profil
 ## Layers
 
 - **Sources** (`models/staging/lake/_lake__sources.yml`): one per lake table, generated from
-  the layout. A table the exporter has not written yet reads as empty.
+  the layout. An append table the exporter has not written yet reads as empty. Every export
+  writes all the snapshots (`snapshots/*.parquet`), so a missing snapshot fails the build:
+  `LAKE_DIR` is wrong, or dbt runs from a directory the relative default does not resolve
+  from. Staging views keep the path as given, so use an absolute `LAKE_DIR` to query them
+  from elsewhere.
 - **Staging**: `stg_lake__<table>` casts columns to the layout types and drops rows repeated
   across exports (keyed on `version_id`, `run_id`, `id`, or `code`).
   `stg_<dataset>__versions` gives each generic dataset type typed columns: money as

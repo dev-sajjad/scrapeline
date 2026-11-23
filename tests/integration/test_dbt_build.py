@@ -18,6 +18,7 @@ from typing import Any
 import duckdb
 import pytest
 
+from scrapeline.analytics.layout import TABLES
 from tests.conftest import ROOT
 
 pytestmark = pytest.mark.integration
@@ -26,7 +27,9 @@ pytest.importorskip("dbt.adapters.duckdb", reason="needs the analytics extra")
 AS_OF = "2026-11-06"
 
 
-def dbt(workdir: Path, lake: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def dbt(
+    workdir: Path, lake: Path, *args: str, check: bool = True
+) -> subprocess.CompletedProcess[str]:
     env = {
         **os.environ,
         "LAKE_DIR": str(lake),
@@ -43,7 +46,8 @@ def dbt(workdir: Path, lake: Path, *args: str) -> subprocess.CompletedProcess[st
         "dbt",
     ]
     result = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True)
-    assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-2000:]
+    if check:
+        assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-2000:]
     return result
 
 
@@ -256,13 +260,52 @@ def test_docs_generate(built: tuple[Path, Path]) -> None:
     assert "model.scrapeline.product_price_history" in catalog["nodes"]
 
 
+def write_empty_snapshots(lake: Path) -> None:
+    """What an export of an empty database leaves: every snapshot, no append files."""
+    con = duckdb.connect()
+    for table in TABLES.values():
+        if table.mode != "snapshot":
+            continue
+        path = lake / table.path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        columns = ", ".join(f'cast(null as {c.type}) as "{c.name}"' for c in table.columns)
+        con.execute(f"copy (select {columns} where false) to '{path}' (format parquet)")
+    con.close()
+
+
 def test_an_empty_lake_builds_empty_marts(tmp_path: Path) -> None:
     lake = tmp_path / "lake"
-    lake.mkdir()
+    write_empty_snapshots(lake)
     dbt(tmp_path, lake, "build")
     con = duckdb.connect(str(tmp_path / "warehouse.duckdb"), read_only=True)
     try:
         for mart in ("product_price_history", "product_price_daily", "scraper_health_daily"):
             assert con.execute(f"select count(*) from {mart}").fetchone() == (0,)
+    finally:
+        con.close()
+
+
+@pytest.mark.parametrize("layout", ["missing", "no_snapshots", "one_snapshot_missing"])
+def test_a_wrong_lake_root_fails_the_build(tmp_path: Path, layout: str) -> None:
+    lake = tmp_path / "lake"
+    if layout == "no_snapshots":
+        (lake / "runs").mkdir(parents=True)
+    elif layout == "one_snapshot_missing":
+        write_empty_snapshots(lake)
+        (lake / TABLES["sources"].path).unlink()
+    result = dbt(tmp_path, lake, "build", check=False)
+    assert result.returncode != 0
+    assert "no lake at LAKE_DIR=" in result.stdout
+    assert "snapshots/sources.parquet" in result.stdout
+    assert not (tmp_path / "warehouse.duckdb").exists() or _mart_missing(tmp_path)
+
+
+def _mart_missing(workdir: Path) -> bool:
+    con = duckdb.connect(str(workdir / "warehouse.duckdb"), read_only=True)
+    try:
+        found = con.execute(
+            "select count(*) from information_schema.tables where table_name = 'dim_source'"
+        ).fetchone()
+        return found == (0,)
     finally:
         con.close()
