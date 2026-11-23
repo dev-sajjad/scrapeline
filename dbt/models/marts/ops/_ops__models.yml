@@ -3,9 +3,10 @@ version: 2
 models:
   - name: scraper_health_daily
     description: >
-      One row per source per UTC day, from the source's first activity to the as-of date.
-      Runs count on the day they started; fetches, checks and agent runs on the day they
-      happened.
+      One row per registered source (in the sources snapshot) per UTC day, from the source's
+      first activity to the as-of date. Runs count on the day they started; fetches, checks
+      and agent runs on the day they happened. Agent runs whose source_id is not a registered
+      source, such as generation eval cases (`gen-<case>`), are left out.
     data_tests:
       - unique_combination_of_columns:
           arguments:
@@ -38,10 +39,20 @@ models:
       - name: rejects
         description: Records that failed validation, from the run stats.
       - name: fetch_errors
-        description: Fetch attempts with a transport error or an HTTP status of 400 or more.
+        description: >
+          Fetch attempts with a transport error or an HTTP status of 400 or more, including
+          attempts a later retry fixed.
       - name: blocked_responses
-        description: Fetch attempts answered with 401, 403 or 429.
+        description: >
+          Anti-bot responses: fetch attempts answered with 401, 403 or 429, plus one per run
+          that failed with BlockedError (run error starting `BlockedError:`) without any such
+          attempt. Challenge pages and empty shells arrive as HTTP 200, so the run error is
+          the only place they show.
+        data_tests: [not_null]
+      - name: blocked_runs
+        description: Runs that started that day and failed with BlockedError, whatever the status code.
+        data_tests: [not_null]
       - name: p95_fetch_ms
         description: 95th percentile of fetch attempt latency in milliseconds.
       - name: agent_cost_usd
-        description: Cost of the agent runs started that day for the source.
+        description: Cost of the agent runs started that day for the source (USD).

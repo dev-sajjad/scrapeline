@@ -152,7 +152,9 @@ def test_scraper_health_counts_runs_fetches_and_costs(
     blocked_day = health[("shop-sim", 4)]
     assert blocked_day["runs"] == 2
     assert blocked_day["success_rate"] == 0.5
+    # Three 429 attempts; the run they blocked is not counted again.
     assert blocked_day["blocked_responses"] == 3
+    assert blocked_day["blocked_runs"] == 1
     assert blocked_day["fetch_errors"] == 3
     assert blocked_day["p95_fetch_ms"] == 230.0  # attempts of 40, 45, 50, 150 and 250 ms
     assert blocked_day["records_updated"] == 1
@@ -173,6 +175,56 @@ def test_scraper_health_counts_runs_fetches_and_costs(
 
     assert health[("legistar-seattle", 3)]["records_loaded"] == 15
     assert max(day for _, day in health) == date.fromisoformat(AS_OF).day
+
+
+def test_a_challenge_page_served_with_200_counts_as_blocked(
+    warehouse: duckdb.DuckDBPyConnection,
+) -> None:
+    (challenge,) = rows(
+        warehouse,
+        "select * from scraper_health_daily "
+        "where source_id = 'books-toscrape' and date_day = date '2026-11-05'",
+    )
+    assert challenge["fetch_errors"] == 0  # the fetch log only saw a 200
+    assert challenge["blocked_runs"] == 1
+    assert challenge["blocked_responses"] == 1
+
+
+def test_scraper_health_covers_registered_sources_only(
+    warehouse: duckdb.DuckDBPyConnection,
+) -> None:
+    sources = {r[0] for r in warehouse.execute("select source_id from dim_source").fetchall()}
+    health = {
+        r[0] for r in warehouse.execute("select source_id from scraper_health_daily").fetchall()
+    }
+    assert health == sources
+    eval_runs = warehouse.execute(
+        "select count(*), sum(cost_usd) from stg_lake__agent_runs "
+        "where source_id = 'gen-g01-static-table'"
+    ).fetchone()
+    assert eval_runs == (1, 0.9)
+    total = warehouse.execute("select sum(agent_cost_usd) from scraper_health_daily").fetchone()
+    assert total is not None and round(total[0], 6) == 0.6
+
+
+def test_scraper_health_counters_are_bigint(warehouse: duckdb.DuckDBPyConnection) -> None:
+    types = dict(
+        (name, type_)
+        for name, type_, *_ in warehouse.execute("describe scraper_health_daily").fetchall()
+    )
+    counters = [
+        "runs",
+        "pages",
+        "records_loaded",
+        "records_inserted",
+        "records_removed",
+        "rejects",
+        "fetches",
+        "blocked_responses",
+        "blocked_runs",
+        "agent_runs",
+    ]
+    assert {name: types[name] for name in counters} == dict.fromkeys(counters, "BIGINT")
 
 
 def test_staging_removes_rows_repeated_across_exports(

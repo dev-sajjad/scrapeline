@@ -5,7 +5,8 @@
 Five days (2026-11-01 to 2026-11-05) of three sources: a simulated shop whose prices and
 stock change, with a product removed and later restored; books.toscrape.com, with a run that
 fails its quality checks; and a Legistar city, whose meetings load into typed tables. One shop
-run is blocked with 429s. Runs follow the runner's rules (a run that fails its checks still
+run is blocked with 429s and one books run by a challenge page served with HTTP 200. A
+generation eval logs an agent run under a case id that is not a registered source. Runs follow the runner's rules (a run that fails its checks still
 loads; only a complete crawl removes records) and product payloads are validated against the
 `product` dataset type. Files follow `analytics/layout.py` and come from two exports that
 overlap the way the exporter's late-commit rules allow, so staging has duplicates to remove.
@@ -65,6 +66,7 @@ BOOKS = Source(
 CITY = Source(
     "legistar-seattle", "Seattle City Council", "legistar", "meeting", 3, "webapi.legistar.com", 13
 )
+EVAL_CASE = "gen-g01-static-table"
 
 
 @dataclass(frozen=True)
@@ -391,6 +393,14 @@ def build(registry: DatasetRegistry) -> SampleLake:
         ],
     )
 
+    # A challenge page comes back as HTTP 200; only the run's error says it was blocked.
+    lake.run(
+        BOOKS,
+        at(5, 7),
+        fetches=[Fetch(200, 90)],
+        error="BlockedError: challenge page: https://books.toscrape.com/",
+    )
+
     lake.run(
         CITY,
         at(1, 8),
@@ -429,6 +439,23 @@ def build(registry: DatasetRegistry) -> SampleLake:
                 "finished_at": at(2, 7, 10 * attempt + 5),
             }
         )
+    # `scrapeline eval` logs generation cases under `gen-<case>`, which is not a source.
+    lake.rows["agent_runs"].append(
+        {
+            "id": str(uuid.uuid5(NAMESPACE, "agent/eval")),
+            "role": "generate",
+            "source_id": EVAL_CASE,
+            "model": "sample-model",
+            "prompt_version": "generator.v1",
+            "attempt": 1,
+            "outcome": "passed",
+            "input_tokens": 30000,
+            "output_tokens": 4000,
+            "cost_usd": 0.9,
+            "started_at": at(3, 9),
+            "finished_at": at(3, 9, 5),
+        }
+    )
     _add_snapshots(lake, registry)
     return lake
 
@@ -522,6 +549,15 @@ def _add_snapshots(lake: SampleLake, registry: DatasetRegistry) -> None:
             "summary": "BlockedError: rate_limited (429): https://shop.example.com/",
             "opened_at": at(4, 6, 1),
             "closed_at": at(4, 14, 1),
+        },
+        {
+            "id": 3,
+            "source_id": BOOKS.id,
+            "kind": "blocked",
+            "status": "open",
+            "summary": "BlockedError: challenge page: https://books.toscrape.com/",
+            "opened_at": at(5, 7, 1),
+            "closed_at": None,
         },
     ]
 

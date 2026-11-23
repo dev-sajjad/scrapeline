@@ -44,7 +44,8 @@ LAKE_DIR=/tmp/lake uv run --extra analytics dbt build --project-dir dbt --profil
   (one row per product version with price and stock changes), `product_price_daily` (one row
   per product per day it existed, with the last price known that day) and
   `scraper_health_daily` (runs, success rate, record counts, rejects, fetch errors, blocked
-  responses, p95 fetch latency and agent cost per source per day).
+  responses and runs, p95 fetch latency and agent cost per registered source per day; agent
+  runs of generation eval cases are not source health and are left out).
 
 ## New dataset types
 
