@@ -38,6 +38,7 @@ dev = [
     "types-python-dateutil",
     "pandas-stubs",
     "pre-commit>=4.0",
+    "import-linter>=2.1",
 ]
 
 [project.optional-dependencies]
