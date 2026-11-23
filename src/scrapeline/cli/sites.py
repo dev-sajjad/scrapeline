@@ -110,7 +110,20 @@ def _classify_one(
             outcome = "no_pages"
         else:
             outcome = apply_classification(conn, site_id, classification, CLASSIFIER_ACTOR)
-    return {"host": host, "outcome": outcome, "pages": len(docs)} | _result(classification)
+        stored = _stored(conn, site_id) if outcome in ("locked", "kept") else {}
+    return {"host": host, "outcome": outcome, "pages": len(docs)} | _result(classification) | stored
+
+
+def _stored(conn: Connection, site_id: int) -> dict[str, Any]:
+    """What the site row keeps when the computed result was not stored (human or LLM call)."""
+    from sqlalchemy import select
+
+    from scrapeline.store import tables as t
+
+    row = conn.execute(
+        select(t.site.c.category, t.site.c.category_method).where(t.site.c.id == site_id)
+    ).one()
+    return {"stored_category": row.category, "stored_method": row.category_method}
 
 
 @site_app.command("classify")

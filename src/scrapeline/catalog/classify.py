@@ -944,7 +944,7 @@ def stored_pages(
     return pages
 
 
-ApplyOutcome = Literal["changed", "refreshed", "locked"]
+ApplyOutcome = Literal["changed", "refreshed", "locked", "kept"]
 
 
 def _evidence_json(evidence: Iterable[Evidence]) -> list[dict[str, Any]]:
@@ -1023,13 +1023,16 @@ def apply_classification(
 
     The row is refreshed every time (confidence, evidence, platform, ...); a log row is
     appended only when the category, tags or method change. A site a human classified keeps
-    its category: automatic results are dropped and "locked" is returned.
+    its category: automatic results are dropped and "locked" is returned. An unclassified
+    result (method none) is no opinion, so it does not replace an LLM's category: "kept".
     """
     site = _locked_site(conn, t.site.c.id == site_id)
     if site is None:
         raise ConfigError(f"unknown site id {site_id}")
     if site.category_method == "human" and classification.method != "human":
         return "locked"
+    if site.category_method == "llm" and classification.method == "none":
+        return "kept"
     return "changed" if _write(conn, site, classification, actor, always_log=False) else "refreshed"
 
 

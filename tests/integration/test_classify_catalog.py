@@ -25,7 +25,7 @@ from scrapeline.catalog.classify import (
 )
 from scrapeline.catalog.datasets import resolve_model
 from scrapeline.catalog.repository import ensure_site
-from scrapeline.catalog.sites import Classification, Evidence
+from scrapeline.catalog.sites import UNCLASSIFIED, Classification, Evidence
 from scrapeline.cli import app
 from scrapeline.errors import ConfigError
 from scrapeline.ops.runs import sync_source
@@ -221,6 +221,25 @@ def test_a_human_override_is_logged_and_never_replaced(clean_db: Engine) -> None
     ]
 
 
+def test_an_unclassified_result_does_not_replace_an_llm_category(clean_db: Engine) -> None:
+    with clean_db.begin() as conn:
+        site_id = ensure_site(conn, SHOP_HOST)
+        apply_classification(conn, site_id, classification("news_media", method="llm"), "llm")
+    nothing = Classification(UNCLASSIFIED, 0.0, "none")
+    with clean_db.begin() as conn:
+        outcome = apply_classification(conn, site_id, nothing, "test")
+    with clean_db.connect() as conn:
+        row = site_row(conn, site_id)
+        logs = log_rows(conn)
+    assert outcome == "kept"
+    assert (row.category, row.category_method) == ("news_media", "llm")
+    assert [(r.new_category, r.method) for r in logs] == [("news_media", "llm")]
+    # A real deterministic opinion still replaces it.
+    with clean_db.begin() as conn:
+        assert apply_classification(conn, site_id, classification(), "test") == "changed"
+        assert site_row(conn, site_id).category_method == "evidence"
+
+
 def test_every_override_is_logged_even_when_it_repeats(clean_db: Engine) -> None:
     with clean_db.begin() as conn:
         ensure_site(conn, SHOP_HOST)
@@ -364,6 +383,8 @@ def test_cli_override_locks_the_category(cli: CliRunner, clean_db: Engine) -> No
     assert done == {"site_id": 1, "host": "camden.gov.uk", "category": "other", "method": "human"}
     again = invoke(cli, "classify", "camden.gov.uk")
     assert (again["outcome"], again["category"]) == ("locked", "government")
+    # The computed result is shown next to what the site row keeps.
+    assert (again["stored_category"], again["stored_method"]) == ("other", "human")
     assert invoke(cli, "list", "--category", "other")[0]["method"] == "human"
     with clean_db.connect() as conn:
         assert [r.actor for r in log_rows(conn)] == ["human:cli"]
