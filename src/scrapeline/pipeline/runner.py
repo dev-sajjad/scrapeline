@@ -28,7 +28,7 @@ from scrapeline.ops.events import EventBus, PostgresEventBus
 from scrapeline.ops.logging import bind_context, get_logger
 from scrapeline.pipeline.crawl import (
     Crawler,
-    fetch_client,
+    build_fetch_client,
     latest_run_raw_rows,
     raw_doc_from_log,
     stored_raw_rows,
@@ -50,6 +50,7 @@ from scrapeline.store.raw import RawStore
 if TYPE_CHECKING:
     import httpx
 
+# The pipeline's entry point: callers import these from here, wherever a stage defines them.
 __all__ = [
     "Items",
     "RunKind",
@@ -152,7 +153,7 @@ class Runner:
         return dataset
 
     def _client(self, cfg: SourceConfig, events: list[FetchEvent]) -> FetchClient:
-        return fetch_client(
+        return build_fetch_client(
             self.settings,
             cfg,
             events,

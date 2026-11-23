@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 log = get_logger(__name__)
 
 
-def fetch_client(
+def build_fetch_client(
     settings: Settings,
     cfg: SourceConfig,
     events: list[FetchEvent],

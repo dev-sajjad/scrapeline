@@ -20,8 +20,8 @@ from scrapeline.errors import HTTPStatusError
 from scrapeline.fetch.client import FetchClient, FetchEvent
 from scrapeline.pipeline.crawl import (
     Crawler,
+    build_fetch_client,
     failed_fetches,
-    fetch_client,
     fetch_log_rows,
     raw_doc_from_log,
 )
@@ -102,7 +102,7 @@ def start(tmp_path: Path, pages: dict[str, list[str]], *, max_pages: int = 50) -
     cfg = SITE.model_copy(update={"max_pages_per_run": max_pages})
     requested: list[str] = []
     events: list[FetchEvent] = []
-    client = fetch_client(
+    client = build_fetch_client(
         Settings(_env_file=None, raw_store_dir=tmp_path / "raw"),
         cfg,
         events,
@@ -217,12 +217,12 @@ def test_raw_doc_from_log_reads_the_stored_bytes_back(tmp_path: Path) -> None:
     assert (raw.final_url, raw.kind, raw.meta) == ("https://s.example/p", "page", {})
 
 
-def test_fetch_client_takes_politeness_from_the_source_and_reports_attempts(
+def test_build_fetch_client_takes_politeness_from_the_source_and_reports_attempts(
     tmp_path: Path,
 ) -> None:
     settings = Settings(_env_file=None, raw_store_dir=tmp_path, http_max_retries=2)
     events: list[FetchEvent] = []
-    with fetch_client(
+    with build_fetch_client(
         settings,
         SITE,
         events,
