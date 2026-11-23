@@ -9,6 +9,8 @@ data/
 evals/results/*.json
 dbt/target/
 dbt/logs/
+dbt/dbt_packages/
+dbt/.user.yml
 airflow/logs/
 *.parquet
 .DS_Store
