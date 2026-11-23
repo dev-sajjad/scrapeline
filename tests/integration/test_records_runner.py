@@ -564,7 +564,8 @@ def test_typed_legistar_run_keeps_its_tables_and_publishes_events(
     assert summary.status == "succeeded", summary.error
     assert summary.loaded["meeting"] == {"inserted": 25, "updated": 0, "unchanged": 0}
     assert summary.loaded["body"]["inserted"] == 83
-    assert summary.removed == 0
+    # Legistar narrows its first run to a lookback window, so the run is not "complete".
+    assert summary.removed == 0 and summary.complete is False
     assert count(clean_db, t.records) == 0
     with clean_db.connect() as conn:
         stored = set(conn.execute(select(t.dataset_type.c.name)).scalars())
@@ -587,7 +588,7 @@ def test_typed_fixture_site_still_loads_meetings(clean_db: Engine, tmp_path: Pat
     )
     first = runner.run(cfg.id)
     assert first.status == "succeeded", first.error
-    assert first.loaded["meeting"]["inserted"] == 25
+    assert first.loaded["meeting"]["inserted"] == 25 and first.complete is False
     second = runner.run(cfg.id)
     assert second.loaded["meeting"] == {"inserted": 0, "updated": 0, "unchanged": 25}
     assert count(clean_db, t.meetings, t.meetings.c.source_id == cfg.id) == 25

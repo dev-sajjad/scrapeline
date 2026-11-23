@@ -76,7 +76,7 @@ class RunSummary:
     checks: dict[str, str] = field(default_factory=dict)
     watermark: str | None = None
     truncated: bool = False
-    complete: bool = False
+    complete: bool = False  # only claimed for generic datasets, where it gates removals
     removed: int = 0
     error: str | None = None
     incident_id: int | None = None
@@ -643,7 +643,9 @@ class Runner:
         summary.rejects = len(rejects)
         summary.checks = {c.name: c.status for c in checks}
         summary.status = "failed" if verdict == "fail" else "succeeded"
-        summary.complete = is_complete_crawl(
+        # A typed adapter may narrow what it lists on its own (Legistar's first-run lookback),
+        # which the runner cannot see, so completeness is claimed for generic datasets only.
+        summary.complete = dataset.storage == "generic" and is_complete_crawl(
             summary.kind,
             windowed=windowed,
             truncated=summary.truncated,
