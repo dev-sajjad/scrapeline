@@ -19,9 +19,10 @@ Rules every implementation must keep:
 - Personal-data fields (FieldDef.pii) are set to None before hashing and storage unless the
   source's `usage.allow_pii` is true, so they never enter the append-only history.
 
-`PostgresRecordStore` also keeps two consequences of these rules: personal data is kept only
-when `allow_pii` comes with a stated purpose, and an observation fetched before a record was
-removed (old raw during reprocess) does not restore it, because it was not seen again.
+`PostgresRecordStore` applies two rules that follow from these: personal data is kept only
+when `allow_pii` comes with a stated purpose (as scrape instructions require), and an
+observation fetched before a record was removed (old raw during a reprocess) does not
+restore it, because the record was not seen again.
 """
 
 from __future__ import annotations
