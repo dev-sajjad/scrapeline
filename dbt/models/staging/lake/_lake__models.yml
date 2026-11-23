@@ -1,0 +1,132 @@
+version: 2
+
+models:
+  - name: stg_lake__record_versions
+    description: >
+      Append-only history of generic records (data.record_versions), one row per version,
+      deduped on `version_id`. The payload is the validated record as JSON; it is empty on
+      `removed` versions. Typed columns per dataset live in the `stg_<dataset>__versions` models.
+    columns:
+      - name: version_id
+        data_tests: [unique, not_null]
+      - name: record_id
+        data_tests: [not_null]
+      - name: dataset
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_dataset')
+                field: dataset
+      - name: version
+        data_tests: [not_null]
+      - name: change_type
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [insert, update, removed, restored]
+      - name: valid_from
+        data_tests: [not_null]
+
+  - name: stg_lake__runs
+    description: Finished scraper runs (ops.run) with their stats JSON, deduped on `run_id`.
+    columns:
+      - name: run_id
+        data_tests: [unique, not_null]
+      - name: source_id
+        data_tests: [not_null]
+      - name: kind
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [incremental, backfill, reprocess]
+      - name: status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [running, succeeded, failed]
+      - name: stats
+        description: >
+          Run summary: pages, rejects, `loaded` (per dataset or typed table: inserted,
+          updated, unchanged and, for generic datasets, restored and removed), checks.
+
+  - name: stg_lake__check_results
+    description: Quality check results per run (ops.check_result).
+    columns:
+      - name: check_result_id
+        data_tests: [unique, not_null]
+      - name: status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [pass, warn, fail]
+
+  - name: stg_lake__fetch_log
+    description: >
+      One row per HTTP attempt (raw.fetch_log). `status` is empty for transport errors,
+      which carry `error` instead.
+    columns:
+      - name: fetch_id
+        data_tests: [unique, not_null]
+      - name: source_id
+        data_tests: [not_null]
+      - name: fetched_at
+        data_tests: [not_null]
+
+  - name: stg_lake__agent_runs
+    description: Repair and generator agent runs with token usage and cost (ops.agent_run).
+    columns:
+      - name: agent_run_id
+        data_tests: [unique, not_null]
+      - name: cost_usd
+        data_tests: [not_null]
+
+  - name: stg_lake__classification_log
+    description: Every change of a site's category (catalog.classification_log).
+    columns:
+      - name: classification_id
+        data_tests: [unique, not_null]
+
+  - name: stg_lake__incidents
+    description: Incidents as of the last export (ops.incident).
+    columns:
+      - name: incident_id
+        data_tests: [unique, not_null]
+      - name: status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [open, ack, closed]
+
+  - name: stg_lake__sources
+    description: Registered sources as of the last export.
+    columns:
+      - name: source_id
+        data_tests: [unique, not_null]
+
+  - name: stg_lake__sites
+    description: Sites (one per host) with their category, as of the last export.
+    columns:
+      - name: site_id
+        data_tests: [unique, not_null]
+      - name: host
+        data_tests: [unique, not_null]
+
+  - name: stg_lake__site_categories
+    description: The site category taxonomy.
+    columns:
+      - name: code
+        data_tests: [unique, not_null]
+
+  - name: stg_lake__dataset_types
+    description: Every version of every registered dataset type.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [dataset, version]
+    columns:
+      - name: storage
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [generic, typed]

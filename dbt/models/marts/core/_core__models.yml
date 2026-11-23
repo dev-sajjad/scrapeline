@@ -1,0 +1,83 @@
+version: 2
+
+models:
+  - name: dim_source
+    description: One row per registered source, with its dataset and the category of its site.
+    columns:
+      - name: source_id
+        data_tests: [unique, not_null]
+      - name: dataset
+        description: Canonical lowercase dataset name.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_dataset')
+                field: dataset
+      - name: status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [draft, active, broken, retired]
+      - name: site_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_site')
+                field: site_id
+      - name: site_category
+        description: Category of the source's site; `unclassified` when it has none.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_lake__site_categories')
+                field: code
+
+  - name: dim_site
+    description: One row per site (host) with its category from the site taxonomy.
+    columns:
+      - name: site_id
+        data_tests: [unique, not_null]
+      - name: host
+        data_tests: [unique, not_null]
+      - name: category
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_lake__site_categories')
+                field: code
+      - name: category_method
+        description: How the category was decided; a `human` override is never replaced.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [rule, evidence, llm, human, none]
+
+  - name: dim_dataset
+    description: One row per dataset type, described by its newest version.
+    columns:
+      - name: dataset
+        data_tests: [unique, not_null]
+      - name: latest_version
+        data_tests: [not_null]
+      - name: storage
+        description: >
+          `generic` datasets are stored as records with version history; `typed` ones
+          (the civic pack) have their own tables.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [generic, typed]
+
+  - name: dim_date
+    description: >
+      Calendar of UTC days from the first activity in the lake to the as-of date (the
+      `as_of_date` var, default today) or the last activity, whichever is later.
+    columns:
+      - name: date_day
+        data_tests: [unique, not_null]
+      - name: iso_week
+        description: ISO 8601 week number.
+      - name: iso_day_of_week
+        description: 1 = Monday ... 7 = Sunday.

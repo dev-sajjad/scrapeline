@@ -1,0 +1,27 @@
+name: scrapeline
+version: "1.0.0"
+config-version: 2
+profile: scrapeline
+
+model-paths: [models]
+macro-paths: [macros]
+test-paths: [tests]
+target-path: target
+clean-targets: [target, logs]
+
+flags:
+  send_anonymous_usage_stats: false
+  version_check: false
+
+vars:
+  # Last day the daily marts cover, as YYYY-MM-DD; empty means today (UTC).
+  as_of_date: ""
+
+models:
+  scrapeline:
+    staging:
+      +materialized: view
+    intermediate:
+      +materialized: view
+    marts:
+      +materialized: table

@@ -1,0 +1,47 @@
+version: 2
+
+models:
+  - name: scraper_health_daily
+    description: >
+      One row per source per UTC day, from the source's first activity to the as-of date.
+      Runs count on the day they started; fetches, checks and agent runs on the day they
+      happened.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [source_id, date_day]
+    columns:
+      - name: source_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_source')
+                field: source_id
+      - name: date_day
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_day
+      - name: runs
+        data_tests: [not_null]
+      - name: success_rate
+        description: Succeeded runs / runs; empty on days without runs.
+      - name: pages
+        description: Pages fetched successfully, from the run stats.
+      - name: records_loaded
+        description: Records the runs loaded or confirmed (inserted + updated + unchanged + restored).
+      - name: records_removed
+        description: Records marked removed after complete crawls.
+      - name: rejects
+        description: Records that failed validation, from the run stats.
+      - name: fetch_errors
+        description: Fetch attempts with a transport error or an HTTP status of 400 or more.
+      - name: blocked_responses
+        description: Fetch attempts answered with 401, 403 or 429.
+      - name: p95_fetch_ms
+        description: 95th percentile of fetch attempt latency in milliseconds.
+      - name: agent_cost_usd
+        description: Cost of the agent runs started that day for the source.

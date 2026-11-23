@@ -1,0 +1,76 @@
+version: 2
+
+models:
+  - name: product_price_history
+    description: >
+      One row per product version: how the price and stock changed and when. Each version
+      is compared with the last observed state before it, so a restored product is compared
+      with its state before the removal. Removed versions have no price or stock of their
+      own; `title` and `url` carry the last observed values.
+    columns:
+      - name: version_id
+        data_tests: [unique, not_null]
+      - name: record_id
+        description: The product (identity within its source).
+        data_tests: [not_null]
+      - name: source_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_source')
+                field: source_id
+      - name: change_type
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [insert, update, removed, restored]
+      - name: valid_from
+        data_tests: [not_null]
+      - name: valid_to
+        description: Start of the next version (exclusive); empty while current.
+      - name: price_amount
+        description: Selling price in `price_currency`.
+      - name: previous_price_amount
+        description: Price of the last observed version before this one.
+      - name: price_change
+        description: price_amount - previous_price_amount; empty when the currencies differ.
+      - name: price_change_pct
+        description: Price change as a percentage of the previous price, rounded to 2 places.
+      - name: price_changed
+        description: Whether the price differs from the last observed one; empty for the first version and removals.
+      - name: stock_changed
+        description: Whether `in_stock` differs from the last observed value; empty for the first version and removals.
+      - name: stock_quantity_change
+        description: stock_quantity - previous_stock_quantity.
+      - name: site_category
+        description: Category of the source's site.
+        data_tests: [not_null]
+
+  - name: product_price_daily
+    description: >
+      One row per product per UTC day on which it existed (a non-removed version was valid
+      at some time that day), with the last price known that day. Products still listed run
+      to the as-of date (the `as_of_date` var, default today).
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [record_id, date_day]
+    columns:
+      - name: date_day
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_day
+      - name: record_id
+        data_tests: [not_null]
+      - name: version_id
+        description: The version whose price is reported for the day.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('product_price_history')
+                field: version_id
