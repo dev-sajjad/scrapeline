@@ -1,12 +1,12 @@
 # scrapeline — CLAUDE.md
 
-Production-grade scraper platform. A human or an agent registers a **source** (any public website, API or document index) with an instruction describing what to collect. The platform generates or hand-writes an **adapter**, tests it against fixtures, runs it politely on a schedule, stores raw bytes immutably, normalises records into PostgreSQL, checks quality, detects drift, and lets a bounded repair agent propose fixes that a human reviews and merges.
+Production-grade platform for collecting structured data from any public website, API or document archive and turning it into analytics-ready history. A human or an agent registers a **source** with an instruction describing what to collect. The platform compiles it into an **adapter** (platform adapter, declarative spec, or generator agent), runs it politely on a schedule, stores raw bytes immutably, validates records against a versioned **dataset type**, keeps every change as history, checks quality, detects drift, lets a bounded repair agent propose fixes that a human merges, exports to a local lakehouse for dbt analytics, and shows everything in a control panel.
 
-**Scale model (how real civic-data teams cover 10,000+ jurisdictions):** most US cities publish meetings through a few vendor platforms (Legistar/Granicus, CivicPlus AgendaCenter, PrimeGov, eScribe, BoardDocs, iQM2). scrapeline writes **one platform adapter per vendor**; a jurisdiction is then just a YAML file with `platform` + `tenant`. Custom one-off sites (the long tail) get a **site adapter**, which is where the generator agent works. Drift on a platform adapter is high-impact (many cities break at once); drift on a site adapter is local.
+**Scale model:** many sites run on a few vendor platforms (shops on Shopify or WooCommerce, blogs on WordPress, US councils on Legistar). scrapeline writes **one platform adapter per vendor**; a site on that platform is then a YAML file with `platform` + `tenant`. Custom one-off sites (the long tail) get a **site adapter**, which is where the generator agent works. Drift on a platform adapter breaks many sources at once; drift on a site adapter is local.
 
-**Universal by design:** any public website, API or document index, in any country and language. Nothing is hard-coded to one country; locale, timezone and date order are per-source config. Legistar (US) is one example platform adapter, not the focus. **Real public sources beat fixtures as proof**: fixtures are for tests and evals; the demo and README show real rows from real sources.
+**Universal by design:** any public website, API or document index, in any country and language. Nothing is hard-coded to one country; locale, timezone and date order are per-source config. Any domain, not only government: products, articles, job postings, listings, meetings. Legistar (US civic meetings) is one example platform adapter, not the focus. **Real public sources beat fixtures as proof**: fixtures are for tests and evals; the demo and README show real rows from real sources.
 
-Owner: Sajjad Hussain. Claude Code assists; the owner reviews and merges everything. Phase numbers in §7 are the single source of truth; every other reference uses them.
+Owner: Sajjad Hussain. Claude Code assists; the owner reviews and merges everything. §7 is the build plan; its status table is the single source of truth for what is done.
 
 ---
 
@@ -29,26 +29,26 @@ Owner: Sajjad Hussain. Claude Code assists; the owner reviews and merges everyth
 ## 1. Architecture (one screen)
 
 ```
-config/sources/*.yaml ──► registry ──► scheduler (CLI until phase 7; Airflow from phase 7)
-                                            │
-                                            ▼
-                                    ops.job queue (Postgres, SKIP LOCKED)
-                                            │
-                                            ▼  workers (trusted)
-            ┌───────── fetch/: urlpolicy → limiter → client.py (httpx) │ browser.py (Playwright) ─────────┐
-            └────────────────────────────────────────┬────────────────────────────────────────────────────┘
+instruction (YAML or panel) ──► compile ──► config/sources/<id>.yaml + adapter + dataset type
+                                                     │
+config/sources/*.yaml ──► registry ──► scheduler (cron) / panel action ──► ops.job queue (SKIP LOCKED)
+                                                     │
+                                                     ▼  worker (trusted)
+            fetch/: urlpolicy → robots → limiter → client.py (httpx) | browser.py (Playwright)
                                                      ▼
-                      store/raw.py  →  data/raw/<source>/<yyyy>/<mm>/<dd>/<sha256>.<ext> (S3 later) + raw.fetch_log
+            store/raw.py → data/raw/<source>/<yyyy>/<mm>/<dd>/<sha256>.<ext> + raw.fetch_log
                                                      ▼
-                      runtime pagination strategy → adapter.parse(raw) -> list[BaseModel]   (pure)
+            adapter.parse(raw) (pure) → validate against dataset type (catalog registry)
                                                      ▼
-                      pipeline: validate → normalise → identity+dedupe → load (Postgres) ; rejects table
+            typed pack tables (civic) | data.records + data.record_versions (append-only history)
                                                      ▼
-                      quality: checks → drift detector → ops.incident → alert
+            quality checks → drift → ops.incident        ops.event → pg_notify → panel (SSE)
                                                      ▼
-            agents (offline sandbox, saved raw only): repairer / generator → PR → deterministic tester → human merge
+            agents (offline sandbox): generator / repairer → deterministic tester → human merge
                                                      ▼
-                      serve (phase 8): FastAPI read API · Streamlit ops dashboard · MCP server
+            lake export → data/lake/*.parquet → dbt (DuckDB): staging → dims/facts → marts
+                                                     ▼
+            serve/: read API + control panel (FastAPI, HTMX, SSE)
 ```
 
 ### 1.1 Who owns what (generic runtime vs adapter)
@@ -91,33 +91,30 @@ Two adapter kinds, same contract:
 
 ```
 src/scrapeline/
-  cli.py             typer entry: source | run | verify | drift | agent | eval | worker
+  cli/               typer commands, one module per area, each exposes register(app) (auto-discovered)
   settings.py        pydantic-settings from .env
-  registry/          load + validate config/sources/*.yaml; status machine draft→active→broken→retired
-  fetch/             urlpolicy.py, limiter.py, robots.py, cache.py, client.py (httpx), browser.py (Playwright pool), pagination.py
-  store/             raw.py (filesystem now, S3 later), db.py (engine, sessions), tables.py (Core tables = migrations)
-  adapters/          base.py, declarative.py (spec.yaml engine); platforms/<vendor>/; sites/<source_id>/ (spec.yaml | parse.py)
-  pipeline/          models.py (pydantic schemas, schema_version), normalise.py, identity.py, load.py, documents.py (PDF)
-  quality/           checks.py, drift.py, incidents.py, antibot.py (block detection)
-  ops/               queue.py (SKIP LOCKED), runs.py, logging.py (structlog JSON), metrics.py
-  agents/            llm.py (thin SDK wrapper), generator.py, repairer.py, tester.py (deterministic, no LLM),
-                     tools/ (narrow @beta_tool fns), prompts/ (versioned .md)
-  evals/             runner.py, metrics.py, report.py
-  serve/             api.py (FastAPI), dashboard.py (Streamlit), mcp.py
-alembic/             migrations (phase 2 onward)
-config/sources/      one YAML per jurisdiction/source (see _example.yaml); platform sources need only platform + tenant
-tests/snapshots/     frozen copies of real public pages/API responses (used by tests and evals; no live calls)
-tests/
-  unit/              pure tests, no docker, no network
-  integration/       marked `integration`; needs `docker compose up`
-  generated/         agent-proposed tests; run in CI separately; never trusted until a human moves them
-  sites/             fixture websites served by nginx (static-list, js-table, pdf-archive, api-cursor, drift/<case>)
-  fixtures/golden/   expected rows per fixture site, JSON; human-owned
-evals/benchmarks/    generation/ repair/ extraction/ cases; evals/results/ outputs
-dbt/                 phase 4, marts over normalised tables
-airflow/dags/        phase 7
-docker/              app (one image: dev shell, CI, worker; Playwright base), sandbox (offline parser runner), nginx
-docs/                adr/, runbook/, ai-review-log.md, evals.md, ai-workflow.md, architecture.md
+  catalog/           datasets.py (schema registry), packs/*.yaml (built-in dataset types), sites.py
+                     (taxonomy + classifier contract), repository.py (DB), classify.py (wave 2)
+  registry/          config.py (source config), instruction.py (scrape instruction + compile)
+  fetch/             urlpolicy.py, limiter.py, robots.py, client.py (httpx), browser.py (Playwright pool), pagination.py
+  store/             raw.py, db.py, tables.py (Core tables = migrations)
+  adapters/          base.py, declarative.py (spec.yaml engine); platforms/<vendor>/; sites/<source_id>/spec.yaml
+  pipeline/          models.py (typed civic pack), values.py (Money), locale.py, normalise.py, identity.py,
+                     load.py (typed tables), records.py (generic store + history), runner.py, documents.py
+  quality/           checks.py, drift.py, incidents.py, antibot.py, golden.py
+  ops/               queue.py, worker.py, runs.py, events.py (ops.event + pg_notify), logging.py
+  agents/            llm.py, generator.py, repairer.py, tester.py, sandbox_harness.py, tools/, prompts/
+  evals/             runner.py
+  analytics/         layout.py (lake contract), export.py (Parquet exporter, wave 2)
+  serve/             api.py (read API), panel/ (control panel, wave 3)
+alembic/             migrations
+config/sources/      one YAML per source        config/datasets/   user-defined dataset types
+config/instructions/ example scrape instructions
+dbt/                 dbt project over the lake (DuckDB): staging (generated from the registry), marts
+tests/               unit/, integration/, generated/, sites/ (nginx fixtures), fixtures/golden/, snapshots/
+evals/benchmarks/    generation/ and repair/ cases; evals/results/ outputs
+docker/              app (Playwright base), sandbox (offline parser runner), nginx
+docs/                adr/, runbook/, ai-review-log.md, evals.md, ai-workflow.md
 ```
 
 ---
@@ -136,12 +133,12 @@ docs/                adr/, runbook/, ai-review-log.md, evals.md, ai-workflow.md,
 | Validation | pydantic v2 | every record is a model with `schema_version` |
 | Dataframes | pandas | quality checks, reports, exports. **Not** the load path: loads are pydantic-validated records + SQL upsert (pandas coerces None/NaN/dates silently) |
 | DB | PostgreSQL 16, SQLAlchemy 2, Alembic | every schema change = migration |
-| Raw store | Filesystem backend (`data/raw`, content-addressed) now; S3 backend (boto3, pinned server image) in step 6 | `RawStore` protocol; same key layout for both |
-| OCR | Tesseract (system package in worker image) via PyMuPDF OCR | phase 5 |
-| Analytics | DuckDB + Parquet, dbt-postgres | phase 4 |
-| Orchestration | CLI, then Airflow 3 LocalExecutor | phase 7 |
+| Raw store | Filesystem backend (`data/raw`, content-addressed); S3 backend later | `RawStore` protocol; same key layout for both |
+| OCR | Tesseract (system package in worker image) via PyMuPDF OCR | |
+| Analytics | Parquet (pyarrow) lake in `data/lake/`, DuckDB, dbt-duckdb (ADR-0007) | layout contract in `analytics/layout.py` |
+| Orchestration | Postgres job queue + `scrapeline schedule` from cron; panel actions enqueue jobs | Airflow/Dagster optional later |
 | LLM | Anthropic Python SDK ≥1.1 behind `agents/llm.py` (ADR-0002) | tool runner + `messages.parse`; smoke test for beta surface |
-| Serve | FastAPI, Streamlit, MCP | phase 8 |
+| Serve | FastAPI read API; control panel with Jinja, HTMX and Server-Sent Events (ADR-0008) | no JS build step |
 | Quality gates | ruff, mypy --strict, pytest, pre-commit, GitHub Actions | |
 
 Upgrade process: SDK or framework major bump = branch, run `tests/unit/test_llm_smoke.py` and the eval suite, ADR if behaviour changed. Model ids come from `.env`, never literals in code.
@@ -161,12 +158,23 @@ Upgrade process: SDK or framework major bump = branch, run `tests/unit/test_llm_
 
 | Migration | Tables |
 |---|---|
-| 0001 (phase 2) | `sources`, `scrapers`, `scraper_versions`, `ops.run`, `ops.job`, `raw.fetch_log` |
-| 0002 (phase 3) | `jurisdictions`, `bodies` (council, committee, board), `meetings`, `agenda_items`, `documents`, `pipeline.rejects` |
-| 0003 (phase 4; `check_result` lands in step 2) | `ops.check_result`, `ops.incident`, `ops.metric_daily` |
-| 0004 (phase 6) | `ops.agent_run`, `ops.agent_tool_call`, `evals.run`, `evals.case_result` |
+| 0001 | `sources`, `scraper_versions`, `ops.run`, `ops.job`, `raw.fetch_log` |
+| 0002 | `jurisdictions`, `bodies` (council, committee, board), `meetings`, `agenda_items`, `documents`, `pipeline.rejects` |
+| 0003 | `ops.check_result`, `ops.incident`, `ops.metric_daily` |
+| 0004 | `ops.agent_run`, `ops.agent_tool_call`, `evals.run`, `evals.case_result` |
+| 0005 | `catalog.site_category` (seeded, taxonomy v1), `catalog.site`, `catalog.classification_log`, `catalog.dataset_type`, `data.records`, `data.record_versions`, `ops.event`; `sources.site_id`, `sources.dataset` |
 
 Nothing may be read from a table that has no migration yet.
+
+### 4.3 Datasets, history and catalog (ADR-0006)
+
+- **Dataset type** = versioned data contract (`catalog/datasets.py`): typed fields (`text int float decimal money bool url date datetime time enum`), key fields, personal-data flags. Built-in packs in `catalog/packs/` (product, article, job_posting); user types in `config/datasets/`; the civic models are registered as `storage: typed`. A changed definition needs a version bump (`sync_dataset_types` refuses silent redefinition). Look up with `default_registry().get(name)` or `resolve_model(name)`; both accept `product`, `meeting` or `Meeting`.
+- **Generic records**: one row per identity `(source_id, dataset, external_id)` in `data.records` (payload = validated JSON; money as `{"amount": "51.77", "currency": "GBP"}`). external_id comes from the parser or from the key fields.
+- **History**: `data.record_versions` is append-only (`insert`, `update`, `removed`, `restored`; `valid_from` = observation time). Removal is only detected after a complete crawl. Validity intervals are derived in dbt. Semantics: `pipeline/records.py`.
+- **Locale** (`pipeline/locale.py`) per source: language, IANA timezone, `date_order` (None = only unambiguous dates; ambiguous → reject with `AmbiguousValueError`), default currency, decimal separator. Naive times are interpreted in the source timezone and stored as UTC.
+- **Sites**: every source links to `catalog.site` (host). Category from taxonomy v1 (`catalog/sites.py`, seeded by migration 0005) with method, confidence and evidence; human overrides are never replaced; every change is logged in `catalog.classification_log`.
+- **Usage rights** (`SourceConfig.usage`): purpose, licence, `allow_pii`, retention. Personal-data fields need `allow_pii` plus a purpose; the lake export drops them otherwise.
+- **Events**: `ops.event` rows + `pg_notify("scrapeline_events")` via `ops/events.py`; publishing never fails the caller.
 
 ---
 
@@ -205,40 +213,40 @@ Agent tools (all in `agents/tools/`, each typed, path-restricted, logged to `ops
 
 Generation success rate · first-attempt deterministic pass rate · extraction field accuracy vs golden · false success rate · repair success rate · regression rate after repair · average repair attempts · human PR acceptance rate · agent tool-call failure rate · tokens and cost per run · cost per successful generation or repair. Benchmarks v1: 5 generation, 10 drift, 20-document extraction; grow to 10/20/40 once the loop is stable. At least half of each set comes from **real-page snapshots** (`tests/snapshots/`, frozen real city pages and mutations of them), not only synthetic fixtures; synthetic-only evals are too easy to be evidence. Results summary committed to `docs/evals.md`.
 
-### 5.5 Source instruction format (universal; human or agent)
+### 5.5 Scrape instruction (universal; human, panel or agent)
+
+`registry/instruction.py` (`ScrapeInstruction`). Says *what*; the platform works out *how*:
 
 ```yaml
-platform: legistar              # legistar | ... | custom  (custom = site adapter)
-tenant: seattle                 # platform client id; omitted for custom
-instruction:
-  collect: "All city council meetings with date, title, location, agenda PDF link"
-  schema: Meeting                 # existing pydantic model, or `new: MeetingV2` with fields listed
-  start_at: ${entry}
-  pagination: next-link           # none | next-link | page-number | cursor | load-more  (runtime strategy)
-  documents: download             # ignore | link-only | download
-  allowed_hosts: [example.gov, docs.example.gov]
-  constraints:
-    max_pages_per_run: 50
-    respect_robots: true
-    rps: 1
-  fields_excluded: [attendees, contact_email, phone, signatures]
+name: Books catalogue
+start_urls: [https://books.toscrape.com/]
+collect: "Every book: title, price, stock status, star rating, product page link"
+dataset: product              # existing type; omit to have one proposed (human approves)
+fields:                       # optional; shorthand `price: money` or a full field definition
+  url: {type: url, key: true}
+  title: text
+  price: money
+crawl: {pagination: auto, follow_detail_pages: false, max_pages: 60, render: auto}
+schedule: daily               # manual | hourly | daily | weekly
+documents: ignore             # ignore | link-only | download
+locale: {language: en-GB, timezone: Europe/London, date_order: dmy, currency: GBP}
+usage: {purpose: "Price tracking", allow_pii: false, retention_days: 365}
 ```
 
-Site adapter spec (`adapters/sites/<source>/spec.yaml`, what the generator writes first):
+Compiled into a source config, a dataset type (if new) and a site adapter. Site adapter spec (`adapters/sites/<source>/spec.yaml`):
 
 ```yaml
-schema: Meeting
-record: "table.meetings tbody tr"            # one match = one record
+schema: product
+record: "article.product_pod"
 fields:
-  title:        {css: "td.title"}
-  meeting_date: {css: "td.date", transform: date}
-  location:     {css: "td.location", optional: true}
-  agenda_url:   {css: "a.agenda", attr: href, transform: absolute_url, optional: true}
-  external_id:  {css: "a.detail", attr: href, transform: absolute_url}
-next_page: {css: "a[rel=next]", attr: href}   # used by the runtime next-link strategy
+  url:      {css: "h3 a", attr: href, transform: absolute_url}
+  title:    {css: "h3 a", attr: title}
+  price:    {css: "p.price_color", transform: money}
+  in_stock: {css: "p.availability", transform: bool}
+next_page: {css: "li.next a", attr: href}
 ```
 
-Generator flow: instruction → worker captures 3 sample pages to raw → cheap-model structure summary → `spec.yaml` (or `parse.py`) + generated tests → sandbox tester → PR with `ops.agent_run.id`. Any site, any country; nothing is hard-coded to US government pages. A US-based reviewer can register government sites without code changes.
+Flow: instruction → validate (URL policy, robots, usage) → worker captures sample pages → site classified → dataset type matched or proposed (human approves) → adapter (known platform, hand-written spec, or generator agent) → offline sandbox tester, sample rows shown (human approves) → draft live run + quality checks → active on schedule.
 
 ---
 
@@ -255,113 +263,55 @@ Generator flow: instruction → worker captures 3 sample pages to raw → cheap-
 
 ---
 
-## 7. Build checklist (single source of truth for phase numbers)
+## 7. Build plan
 
-| Phase | Scope |
-|---|---|
-| 0 | Project skeleton |
-| 1 | Fixture websites and golden datasets |
-| 2 | Scraping runtime and infrastructure |
-| 3 | ETL pipeline and PostgreSQL |
-| 4 | Data quality, monitoring, dbt |
-| 5 | PDF and document extraction |
-| 6 | AI agents and evaluation |
-| 7 | Airflow, orchestration, deployment |
-| 8 | API, dashboard, MCP, release |
+**v1 (done, on `main`):** Docker base, Legistar platform adapter on 3 real cities, raw store, idempotent typed loads, Playwright and documents, anti-bot detection, quality checks, drift diagnosis, offline sandbox, repair and generator agents with evals, job queue and worker, read API, demo. Open from v1: paid eval run to fill `docs/evals.md`; ≥2 accepted and ≥2 rejected agent PRs in the review log; schema-bump compatibility test; `api-cursor` fixture; S3 raw backend.
 
-A phase is complete only when its code and tests exist and CI is green.
+**v2 (in progress): any-domain data platform with analytics and a control panel.** Flagship analytics question: *how do prices and stock change over time?* plus a scraper-health mart.
 
-### 7.0 Build order: steps (how phases are actually worked)
+### 7.1 Status
 
-**Status 2026-11-18:** steps 1–6 merged to `main`. Workflow: commit to `development`, owner merges `development` → `main`. Next: per-source locale/timezone (dates are parsed US-order today); `import-linter` layer contracts + split `runner.py` + `fetch/pagination.py`; generic `Record` schema; 2–3 real non-US sources (one via generator); paid eval run to fill `docs/evals.md`; ≥2 accepted + ≥2 rejected agent PRs in the review log. CivicPlus dropped. Later: Kiri, S3 raw backend, Airflow/dbt (cut list; cron + worker is the fallback).
-
-Phases group capabilities; **steps set the order**. Each step ships a working end-to-end demo on its own branch with CI green before the next starts. Build the thinnest version of each phase item the step needs; finish the rest later. Do not start step 4 (agents) before steps 2 and 3 work. Repair agent comes before generator: it is easier to measure and maps to "find the cause of broken or drifting scrapers".
-
-| Step | Goal (demoable result) | Phase items pulled in |
+| Wave | Scope | Status |
 |---|---|---|
-| **1 — Docker base** | `make up` (postgres + fixtures); app image on Playwright base; settings, logging, CLI, pre-commit, CI | 0 (all) |
-| **2 — Real data end to end** | `scrapeline run legistar-<city>` for 3 real cities → raw store → `meetings` + `bodies` in Postgres; run twice = same counts; README shows real rows | 2: `urlpolicy` (no pinning), `limiter`, `robots`, `client.py`, `store/raw.py`, `adapters/base.py`, registry, Legistar platform adapter, migration 0001; 3: models, identity, load, watermark, rejects, migration 0002; 4: count-range, null-rate, duplicate checks (pandas) → `ops.check_result` |
-| **3 — HTML, browser, documents, anti-bot** | CivicPlus AgendaCenter platform adapter (HTML + pagination + agenda PDFs) on real cities; Playwright on `js-table`; 403/429 detected not evaded | 1: static-list, js-table, pdf-archive, blocked fixtures + golden; 2: `browser.py`, `pagination.py`, `antibot.py`, `ops/queue.py` + worker; 5: PDF text + page count (OCR flag); `tests/snapshots/` of real pages |
-| **4 — Drift, repair agent, evals** (headline) | Mutated snapshot breaks an adapter → drift incident → repairer opens PR → tester passes/fails it deterministically → eval table in `docs/evals.md` | 4: `drift.py`, incidents, migration 0003, runbook; 1: drift cases (real snapshot mutations first); 6: `llm.py`, tools, tester, offline sandbox, `declarative.py` + site specs, repairer, migration 0004, evals, review log (≥2 rejected, ≥2 accepted) |
-| **5 — Generator for long tail** | Register a custom city site by instruction only → generator PR → human review → live `draft` run | 6: generator + prompt + generation evals |
-| **6 — Ship** | `make demo` in under 5 minutes; README proof table | 4: dbt marts; 7: Airflow DAGs (or documented cron fallback); 8: FastAPI; S3 raw backend; cut list applies to the rest |
+| 0 | Contracts: schema registry and packs, locale and money types, site taxonomy, scrape instruction, events, record-store and lake interfaces, migration 0005, ADR-0006/7/8, CLI split | done 2026-11-24 |
+| 1 | Generic data: record store with history, locale-aware parsing, instruction compile | next |
+| 2 | Demo sources, lake export, dbt, site classifier, runner split + layer contracts | planned |
+| 3 | Control panel: read-only pages, data and lineage views, live events | planned |
+| 4 | Panel actions and auth, OpenLineage, LLM classifier fallback, agents page, README/demo | planned |
 
-Real-source rules: register only official/public endpoints; fill the `legal:` block first; test reachability from the operator's location early (US geo-blocks happen; fallback is the US CI runner, never a proxy).
+### 7.2 Waves and file ownership
 
-### Phase 0 — Skeleton
-- [ ] `git init`, first commit; GitHub repo `scrapeline`, `main` protected (PR only).
-- [ ] `make setup` succeeds (`uv.lock` committed); `make up` brings postgres + fixtures healthy; `make image` builds the Playwright-based app image; `make sandbox-check` passes.
-- [x] `settings.py`, `ops/logging.py`, `cli.py` with `scrapeline --help`.
-- [x] Pre-commit: ruff, mypy. CI green on an empty test. `docs/ai-workflow.md` written.
+A file has exactly one owner per wave. Builders change only files they own; anything else is a request to the orchestrator. Wave 0 contract modules are read-only for builders unless the brief says otherwise. `pyproject.toml`, `uv.lock`, `store/tables.py`, migrations, `settings.py` and this file belong to the orchestrator.
 
-### Phase 1 — Fixture sites and golden data
-- [x] `tests/sites/static-list/`: 3 pages, next-link pagination, 25 meetings, inconsistent date formats.
-- [x] `tests/sites/js-table/`: table rendered by JS from inline JSON, "Load more" button.
-- [x] `tests/sites/pdf-archive/`: index page + 5 small PDFs (one scanned image for OCR).
-- [ ] `tests/sites/api-cursor/`: JSON pages with cursor; nginx rate limit returns 429.
-- [x] `tests/sites/blocked/`: 403 page and a challenge-style HTML shell, to test anti-bot *detection* (not evasion).
-- [ ] `tests/sites/drift/<case>/`: 20 single-mutation copies (selector changed, pagination button changed, field optional, date format changed, async render, document link moved, + 14 variants); `drift/README.md`.
-- [x] `tests/fixtures/golden/<site>.json` for every fixture. Human-owned.
+| Wave | Agent | Task | Owns |
+|---|---|---|---|
+| 1 | A records | `PostgresRecordStore` (history, removal after complete crawls); runner routes generic datasets to it and typed ones to `load.py`; dataset-aware quality checks; runner publishes events; `dataset list/show/sync` CLI | `pipeline/records.py`, `pipeline/load.py`, `pipeline/runner.py`, `quality/checks.py`, `catalog/repository.py`, `cli/datasets.py`, their tests |
+| 1 | B parsing | Locale-aware `parse_date`/`parse_datetime`/`parse_money`/`parse_number`; declarative engine on dataset types (new transforms, `pattern`, `map`, locale, ambiguous → reject); sandbox, tester and agent tools on the registry; explicit `locale` on existing sources | `pipeline/normalise.py`, `pipeline/locale.py`, `adapters/declarative.py`, `adapters/platforms/legistar/`, `agents/sandbox_harness.py`, `agents/tester.py`, `agents/tools/`, `docker/sandbox/`, `cli/runs.py`, `config/sources/`, existing `adapters/sites/`, their tests |
+| 1 | C instructions | Compile `ScrapeInstruction` → source config + dataset type + spec skeleton; `instruction validate/apply` CLI; example instructions; user guide | `registry/instruction.py`, `cli/instructions.py`, `cli/agents.py`, `config/instructions/`, `docs/instructions.md`, their tests |
+| 2 | D demo sources | books.toscrape (real) and a simulated shop fixture whose prices and stock change across snapshots; specs, golden rows, end-to-end history test | new `config/sources/`, new `adapters/sites/`, `tests/sites/shop-sim/`, `tests/snapshots/toscrape/`, golden files |
+| 2 | E lake export | Parquet exporter per `analytics/layout.py`; incremental state; personal-data filter; `lake export` CLI | `analytics/export.py`, `cli/analytics.py`, tests |
+| 2 | F dbt | dbt-duckdb project; staging models generated from the registry; dims; marts `price_history`, `scraper_health_daily`; dbt tests and docs | `dbt/`, `scripts/gen_dbt_staging.py` |
+| 2 | G classifier | Site classifier: domain rules, page evidence, platform fingerprints; audit log; `site classify/override` CLI | `catalog/classify.py`, `cli/sites.py`, tests |
+| 2 | H structure | Split `runner.py` into crawl / ingest / finalise; `fetch/pagination.py`; `import-linter` layer contracts in CI | `pipeline/runner*.py`, `fetch/pagination.py`, `.importlinter`, CI workflow |
+| 3 | I panel shell | Panel app, layout, health, sources, sites, runs pages; `panel` compose service | `serve/panel/` (shell, those pages) |
+| 3 | J data views | Data explorer, record lineage (record → version → raw file), storage browser, marts view | `serve/panel/` (those pages) |
+| 3 | K live | `LISTEN` → SSE stream, live run log | `serve/panel/live.py`, `ops/events.py` (listener side) |
+| 4 | L actions | Add instruction, approval gates, run now, backfill, incident ack/close, category override; login token, CSRF, audit | `serve/panel/actions*` |
+| 4 | M lineage | OpenLineage events; LLM fallback for the classifier | `ops/openlineage.py`, `catalog/classify_llm.py` |
+| 4 | N agents | Agents page (start repair/generate, diff, cost); README and demo update | `serve/panel/agents*`, `README.md`, `scripts/demo.sh` |
 
-### Phase 2 — Runtime core (hand-written, no AI)
-- [ ] `fetch/urlpolicy.py`: scheme, allowlist, DNS resolve + private/metadata rejection, IP pinning, redirect revalidation. Unit tests per rule.
-- [ ] `fetch/limiter.py` shared per-host token bucket; `fetch/robots.py` (protego); `fetch/cache.py` ETag/Last-Modified + body hash.
-- [x] `fetch/client.py`: identified UA, timeouts, tenacity retries on 429/5xx/timeouts, circuit breaker per host, `raw.fetch_log` row per request.
-- [x] `fetch/browser.py`: Playwright pool, same limiter and policy, `page.route` allowlist + resource blocking + logging, service workers blocked, screenshot on failure.
-- [ ] `fetch/pagination.py`: five strategies, each with a fixture test.
-- [x] `quality/antibot.py`: detect 403/429/challenge shells/empty renders → backoff + incident, never retry past policy.
-- [x] `store/raw.py`; `ops/queue.py` (SKIP LOCKED, lease, heartbeat, dead-letter); `scrapeline worker`.
-- [x] `adapters/base.py` + `registry/` with status machine.
-- [x] Platform adapter: Legistar Web API (step 2) — Seattle, Oakland, Denver; snapshot tests. (sfgov retired: tenant returns 400.)
-- [~] Dropped 2026-11-18 (adds no capability beyond Legistar): platform adapter CivicPlus AgendaCenter. Finding 2026-11-17: rows load via `POST /AgendaCenter/UpdateCategoryList {year, catID}` per category; needs `FetchClient.post` (same policy) or BrowserPool expanding categories. `/RSS.aspx` is robots-disallowed on sampled sites.
-- [ ] Hand-written site adapters for the 4 base fixture sites; integration tests green.
-- [x] ADR-0005: URL policy v1 scope (IP pinning deferred, reasons, residual risk).
-- [x] Migration 0001.
+### 7.3 Multi-agent build rules
 
-### Phase 3 — Pipeline
-- [ ] `pipeline/models.py`: `Meeting`, `AgendaItem`, `Document`, `Jurisdiction` with validators and `schema_version`.
-- [x] `identity.py` (external id / natural key + content hash), `normalise.py`, `load.py` (upsert with lineage columns, first/last seen).
-- [x] Watermarks; `scrapeline run <source> --since`, `--backfill --from --to`, `scrapeline reprocess --from-raw`.
-- [x] `pipeline.rejects` with reason; never dropped silently.
-- [ ] Migration 0002. Tests: idempotency ✅; title-change updates not duplicates ✅; old raw sample parses after schema bump (open: needs a first schema bump).
-
-### Phase 4 — Quality, drift, ops, dbt
-- [ ] `quality/checks.py`: record-count range, required-field null rate, duplicate rate, reject rate, freshness, extraction success rate, document download counts, schema failures, volume vs 7-day median → `ops.check_result`.
-- [ ] `quality/drift.py`: zero rows, missing-field rate, sample-page structure hash → `ops.incident` (open/ack/closed).
-- [ ] `ops/metrics.py`: daily aggregates in `ops.metric_daily`; alerts via log event + optional webhook.
-- [ ] Migration 0003. dbt: `dim_source, dim_date, dim_jurisdiction, fact_meeting, fact_document`, marts `source_freshness, scraper_health_daily`, dbt tests.
-- [x] Runbook page per alert type.
-
-### Phase 5 — Documents
-- [ ] `pipeline/documents.py`: download via FetchClient (urlpolicy applied), pymupdf text, OCR fallback flag, text + page count + hash stored.
-- [ ] LLM extraction via `messages.parse` into `AgendaItem` list; 40-doc golden set; field accuracy reported.
-
-### Phase 6 — Agents and evals
-- [x] `agents/llm.py` wrapper + `tests/unit/test_llm_smoke.py` (marked `llm`).
-- [x] `agents/tools/`: eight tools, path-restricted, logged to `ops.agent_tool_call`.
-- [x] `agents/tester.py` deterministic: sandbox run, trusted tests, golden, security checks, JSON report.
-- [x] Sandbox Dockerfile, offline `docker run --network none` (ADR-0004 revised).
-- [x] `agents/generator.py` + `prompts/generator.v1.md`; `agents/repairer.py` + `prompts/repairer.v1.md` (3 attempts, scope-limited, escalates).
-- [ ] Migration 0004. `evals/` computing §5.4 metrics over 5 generation + 10 drift cases (v1); `docs/evals.md` filled.
-- [ ] `docs/ai-review-log.md`: ≥2 agent PRs rejected with reasons, ≥2 accepted.
-
-### Phase 7 — Orchestration and deploy
-- [ ] Airflow 3 DAGs from registry: `scrape_<source>`, `quality_daily`, `dbt_daily`; LocalExecutor.
-- [ ] `docker compose --profile prod up` on one VM or local; documented.
-- [ ] GitHub Actions nightly: fixture suite + eval summary; US runner job for geo-blocked public sources.
-
-### Phase 8 — Serve and ship
-- [x] FastAPI: `/sources`, `/meetings?jurisdiction=&since=`, `/health`.
-- [ ] Streamlit over ops tables: scraper health, incidents, agent metrics, cost.
-- [ ] MCP server: `search_meetings`, `source_status`.
-- [x] `scripts/demo.sh` end to end; README with diagram, metrics table, ADR index, production-grade proof table.
-
-Cut order if time runs out: MCP → Streamlit → Airflow (keep a documented cron fallback) → dbt. Never cut steps 1–4 (phases 0–4 and 6).
-
+1. The orchestrator writes contracts first, briefs each builder, merges, runs the gate and keeps §7.1 current. A fresh reviewer agent reviews each wave's diff before it lands on `development`.
+2. Each builder works in its own git worktree on `wave<N>/<agent>-<slug>`, branched from `development` at the wave base. Builders never commit to `development` or `main` and never push.
+3. Integration tests use the shared compose stack with a private database: `SCRAPELINE_TEST_DB=scrapeline_test_<agent>`. New fixture sites are tested through `httpx.MockTransport` or a private nginx on the agent's assigned port.
+4. Before reporting: `bash scripts/check.sh` exits 0 (never piped) and the agent's integration tests pass. The report lists files changed, tests added, deviations from the contract, and requests for files the agent does not own.
+5. No new dependencies from builders; the orchestrator adds them before the wave starts.
+6. Gate per wave: merge all branches, full check, full integration suite, review, then push `development`. The owner merges `development` into `main`.
 ---
 
 ## 8. Acceptance standards (every PR)
-1. Phase code and tests exist before the phase is called done.
+1. A wave item is done only when its code and tests exist and the gate is green.
 2. Every schema change ships an Alembic migration.
 3. Every adapter has fixture-based tests.
 4. Trusted tests and golden fixtures are never modified by agents.
@@ -375,4 +325,4 @@ Cut order if time runs out: MCP → Streamlit → Airflow (keep a documented cro
 12. No secrets in the repo; no new network path outside `fetch/`.
 
 ## 9. Commands
-`make setup` · `make up` · `make image` · `make shell` · `make sandbox-check` · `make test` · `make test-int` · `make lint` · `make type` · `make migrate` · `make eval` · `make demo` · `scrapeline --help`
+`make setup` · `make up` · `make image` · `make shell` · `make sandbox-check` · `make check` · `make test` · `make test-int` · `make lint` · `make type` · `make migrate` · `make eval` · `make demo` · `scrapeline --help`
