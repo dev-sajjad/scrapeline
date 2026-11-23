@@ -13,28 +13,35 @@ or by the generator agent. Minimal form:
 (types must match; new fields need a new dataset type or version). For a new type name, or
 with no `dataset`, `fields` defines the new type and needs at least one key field. With
 neither, a dataset type is proposed from `collect` and needs human approval.
+
+`compile_instruction` turns an instruction into a draft source config, its dataset type (when
+new) and a spec.yaml skeleton. The draft never runs on a schedule until a human approves the
+dataset type, completes the adapter, reviews the site's terms and activates it.
 """
 
 from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import dataclass
+from datetime import date
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from scrapeline.catalog.datasets import (
     NAME_PATTERN,
     RESERVED_FIELDS,
+    DatasetRegistry,
     DatasetType,
     FieldDef,
     default_registry,
 )
 from scrapeline.errors import ConfigError, DatasetError
 from scrapeline.pipeline.locale import Locale
-from scrapeline.registry.config import UsageRights
+from scrapeline.registry.config import Pagination, SourceConfig, UsageRights, WatermarkConfig
 
 PaginationRequest = Literal["auto", "none", "next-link", "page-number", "cursor", "load-more"]
 Schedule = Literal["manual", "hourly", "daily", "weekly"]
@@ -146,3 +153,397 @@ class ScrapeInstruction(_Strict):
             return cls.model_validate(data)
         except Exception as exc:
             raise ConfigError(f"invalid instruction: {exc}") from exc
+
+
+DECLARATIVE_ADAPTER = "scrapeline.adapters.declarative:DeclarativeAdapter"
+# A date no real review has: it marks `legal.terms_checked` as "not reviewed yet".
+UNREVIEWED_TERMS = date(1970, 1, 1)
+UNKNOWN_JURISDICTION = {"id": "xx-unknown", "name": "TODO(human): jurisdiction", "country": "XX"}
+
+_PAGINATION: dict[str, Pagination] = {
+    "auto": "next-link",
+    "none": "none",
+    "next-link": "next-link",
+    "page-number": "page-number",
+    "cursor": "cursor",
+    "load-more": "load-more",
+}
+# Spec transform per field type; text and enum fields are read as plain text.
+_TRANSFORMS = {
+    "int": "int",
+    "float": "float",
+    "decimal": "decimal",
+    "money": "money",
+    "bool": "bool",
+    "url": "absolute_url",
+    "date": "date",
+    "datetime": "datetime",
+    "time": "time",
+}
+# load_source_file expands ${NAME} from the environment, so untrusted text must not carry one.
+_ENV_REFERENCE = re.compile(r"\$\{[A-Z0-9_]+\}")
+
+
+@dataclass(frozen=True)
+class CompiledInstruction:
+    """A draft source, its dataset type (None while one must be proposed) and a spec skeleton."""
+
+    source: SourceConfig
+    dataset_type: DatasetType | None
+    dataset_is_new: bool
+    fields: tuple[str, ...]
+    spec_skeleton: str
+    next_steps: tuple[str, ...]
+
+    @property
+    def needs_dataset_proposal(self) -> bool:
+        return self.dataset_type is None
+
+    @property
+    def site_dir(self) -> str:
+        """Directory name of the site adapter under adapters/sites/."""
+        return self.source.id.replace("-", "_")
+
+    @property
+    def personal_data_fields(self) -> tuple[str, ...]:
+        if self.dataset_type is None:
+            return ()
+        return tuple(n for n in self.fields if self.dataset_type.fields[n].pii)
+
+    def source_yaml(self) -> str:
+        return render_source_yaml(self.source)
+
+    def dataset_yaml(self) -> str | None:
+        """Definition file for config/datasets/, only when the dataset type is new."""
+        if self.dataset_type is None or not self.dataset_is_new:
+            return None
+        return render_dataset_yaml(self.dataset_type)
+
+    def summary(self) -> dict[str, Any]:
+        src = self.source
+        return {
+            "source_id": src.id,
+            "name": src.name,
+            "status": src.status,
+            "entry": src.entry,
+            "allowed_hosts": src.hosts,
+            "kind": src.kind,
+            "cadence": src.cadence,
+            "pagination": src.pagination,
+            "max_pages_per_run": src.max_pages_per_run,
+            "dataset": src.dataset_name,
+            "dataset_is_new": self.dataset_is_new,
+            "dataset_proposal_needed": self.needs_dataset_proposal,
+            "fields": list(self.fields),
+            "fields_excluded": src.instruction.fields_excluded if src.instruction else [],
+            "personal_data_fields": list(self.personal_data_fields),
+            "next_steps": list(self.next_steps),
+        }
+
+
+def compile_instruction(ins: ScrapeInstruction, registry: DatasetRegistry) -> CompiledInstruction:
+    """Compile an instruction into a draft source, dataset type and spec skeleton. Pure.
+
+    Dataset types are looked up in `registry` only. Raises ConfigError when the instruction
+    does not fit that registry (unknown dataset, mismatched or missing fields, personal data
+    without permission) or when its text would be expanded as an environment variable.
+    """
+    dataset, is_new = _resolve_dataset(ins, registry)
+    if dataset is None:
+        dataset_name = ins.dataset or _derived_dataset_name(ins.source_id)
+        wanted: dict[str, FieldDef] = {}
+        excluded: list[str] = []
+    else:
+        dataset_name = dataset.name
+        wanted = _wanted_fields(ins, dataset)
+        excluded = [name for name in dataset.fields if name not in wanted]
+    typed = dataset is not None and dataset.storage == "typed"
+    pagination = _PAGINATION[ins.crawl.pagination]
+    options: dict[str, Any] = {}
+    if len(ins.start_urls) > 1:
+        options["extra_start_urls"] = ins.start_urls[1:]
+    if ins.crawl.follow_detail_pages:
+        options["follow_detail_pages"] = True
+    data: dict[str, Any] = {
+        "id": ins.source_id,
+        "name": ins.name,
+        "platform": "custom",
+        "kind": "js" if ins.crawl.render == "always" else "html",
+        "entry": ins.start_urls[0],
+        "allowed_hosts": ins.hosts,
+        "cadence": ins.schedule,
+        "legal": {"terms_checked": UNREVIEWED_TERMS, "notes": _legal_note(ins)},
+        # The legacy `schema` key keeps naming the hand-written model for typed datasets.
+        "schema": dataset.record_model().__name__ if typed and dataset else dataset_name,
+        "dataset": dataset_name,
+        "locale": ins.locale,
+        "usage": ins.usage,
+        "adapter": DECLARATIVE_ADAPTER,
+        "status": "draft",
+        "owner": "instruction",
+        "pagination": pagination,
+        "max_pages_per_run": ins.crawl.max_pages,
+        "quality": {"max_null_rate": {n: 0.0 for n, f in wanted.items() if f.required}},
+        "instruction": {
+            "collect": ins.collect,
+            "schema": dataset_name,
+            "pagination": pagination,
+            "documents": ins.documents,
+            "max_pages_per_run": ins.crawl.max_pages,
+            "fields_excluded": excluded,
+        },
+        "options": options,
+    }
+    if typed:
+        data["jurisdiction"] = UNKNOWN_JURISDICTION
+    try:
+        source = SourceConfig.model_validate(data)
+    except ValidationError as exc:
+        raise ConfigError(f"instruction does not compile to a valid source: {exc}") from exc
+    if _ENV_REFERENCE.search(render_source_yaml(source)):
+        raise ConfigError("instruction text may not contain ${NAME} references")
+    return CompiledInstruction(
+        source=source,
+        dataset_type=dataset,
+        dataset_is_new=is_new,
+        fields=tuple(wanted),
+        spec_skeleton=_spec_skeleton(ins, dataset_name, wanted, pagination),
+        next_steps=tuple(_next_steps(ins, source, dataset, is_new, wanted, typed)),
+    )
+
+
+def _resolve_dataset(
+    ins: ScrapeInstruction, registry: DatasetRegistry
+) -> tuple[DatasetType | None, bool]:
+    if ins.needs_dataset_proposal:
+        return None, False
+    name = ins.dataset or _derived_dataset_name(ins.source_id)
+    try:
+        existing: DatasetType | None = registry.get(name)
+    except DatasetError:
+        existing = None
+    if existing is not None and ins.dataset is not None:
+        return existing, False
+    if not ins.fields:
+        raise ConfigError(f"unknown dataset {name!r}; define its fields")
+    try:
+        candidate = DatasetType(
+            name=name,
+            description=_description(ins),
+            pack="user",
+            fields=ins.fields,
+            canonical_url_field=_canonical_url_field(ins.fields),
+        )
+    except ValidationError as exc:
+        raise DatasetError(f"invalid dataset type {name!r}: {exc}") from exc
+    if existing is None:
+        return candidate, True
+    # The name was derived from the source id; reuse it only if it is the same contract.
+    if existing.definition_hash == candidate.definition_hash:
+        return existing, False
+    raise ConfigError(
+        f"dataset {name!r} already exists with a different definition; "
+        "set `dataset` to name the new type"
+    )
+
+
+def _wanted_fields(ins: ScrapeInstruction, dataset: DatasetType) -> dict[str, FieldDef]:
+    if ins.fields:
+        for name, f in ins.fields.items():
+            known = dataset.fields.get(name)
+            if known is None or known.type != f.type:
+                raise ConfigError(
+                    f"field {name!r} is not a {f.type} field of dataset {dataset.name!r}; "
+                    "new fields need a new dataset type or version"
+                )
+        missing = [n for n, f in dataset.fields.items() if f.required and n not in ins.fields]
+        if missing:
+            raise ConfigError(
+                f"fields must include the key and required fields of {dataset.name!r}: {missing}"
+            )
+    wanted = {n: f for n, f in dataset.fields.items() if not ins.fields or n in ins.fields}
+    pii = [n for n, f in wanted.items() if f.pii]
+    if pii and not ins.usage.allow_pii:
+        raise ConfigError(f"fields {pii} are personal data; set usage.allow_pii with a purpose")
+    return wanted
+
+
+def _derived_dataset_name(source_id: str) -> str:
+    name = source_id.replace("-", "_")
+    return (name if name[0].isalpha() else f"d_{name}")[:63]
+
+
+def _description(ins: ScrapeInstruction) -> str:
+    first_line = (ins.collect.strip().splitlines() or [ins.name])[0]
+    return first_line.strip()[:200]
+
+
+def _canonical_url_field(fields: dict[str, FieldDef]) -> str | None:
+    urls = [name for name, f in fields.items() if f.type == "url"]
+    for name in urls:
+        if fields[name].key:
+            return name
+    return "url" if "url" in urls else None
+
+
+def _legal_note(ins: ScrapeInstruction) -> str:
+    terms = f" ({ins.usage.terms_url})" if ins.usage.terms_url else ""
+    return (
+        f"TODO(human): not reviewed. Read the terms of use{terms} and robots.txt of "
+        f"{', '.join(ins.hosts)}, then set terms_checked to the review date and replace "
+        "this note with why collecting is allowed and what is excluded."
+    )
+
+
+def _field_placeholder(name: str, f: FieldDef) -> dict[str, Any]:
+    entry: dict[str, Any] = {"css": f"TODO: CSS selector for {name}"}
+    # Typed (civic) models describe URLs as text, so the name decides there.
+    if f.type == "url" or (f.type == "text" and (name == "url" or name.endswith("_url"))):
+        entry["attr"] = "src" if "image" in name else "href"
+        entry["transform"] = "absolute_url"
+    elif f.type in _TRANSFORMS:
+        entry["transform"] = _TRANSFORMS[f.type]
+    if not f.required:
+        entry["optional"] = True
+    return entry
+
+
+def _spec_skeleton(
+    ins: ScrapeInstruction, schema: str, fields: dict[str, FieldDef], pagination: Pagination
+) -> str:
+    spec: dict[str, Any] = {
+        "spec_version": 1,
+        "schema": schema,
+        "record": "TODO: CSS selector matching one record element",
+        "fields": {name: _field_placeholder(name, f) for name, f in fields.items()},
+    }
+    if pagination == "next-link":
+        spec["next_page"] = {"css": "TODO: CSS selector for the next-page link", "attr": "href"}
+    if ins.crawl.render == "always":
+        render = {"wait_for": "TODO: CSS selector present once the records have rendered"}
+        if pagination == "load-more":
+            render["click_until_gone"] = "TODO: CSS selector for the load-more button"
+        spec["render"] = render
+    header = (
+        f"# Site adapter skeleton for {ins.source_id}. Replace every TODO selector by hand,\n"
+        "# or run the generator agent on captured sample pages.\n"
+    )
+    # Flow style and a wide line keep one field per line, like hand-written specs.
+    body = yaml.safe_dump(
+        spec, sort_keys=False, allow_unicode=True, default_flow_style=None, width=200
+    )
+    return header + body
+
+
+def _next_steps(
+    ins: ScrapeInstruction,
+    source: SourceConfig,
+    dataset: DatasetType | None,
+    is_new: bool,
+    wanted: dict[str, FieldDef],
+    typed: bool,
+) -> list[str]:
+    sid = source.id
+    name = source.dataset_name
+    spec = f"adapters/sites/{sid.replace('-', '_')}/spec.yaml"
+    steps: list[str] = []
+    if dataset is None:
+        steps += [
+            f"Capture sample pages: scrapeline capture {sid}.",
+            f"A dataset type must be proposed: define '{name}' in config/datasets/{name}.yaml "
+            "(by hand or from the generator agent's proposal) and have a human approve it.",
+            f"Then add `dataset: {name}` and its `fields` to the instruction and apply it "
+            "again with --force.",
+        ]
+    elif is_new:
+        keys = ", ".join(dataset.key_fields)
+        steps.append(
+            f"Approve the new dataset type '{name}' (config/datasets/{name}.yaml): check field "
+            f"types, key fields ({keys}) and personal-data flags."
+        )
+    if typed:
+        steps.append(
+            "Fill in the jurisdiction block of the source config (placeholder xx-unknown)."
+        )
+    steps.append(
+        f"Fill the TODO selectors in {spec} by hand, or capture sample pages "
+        f"(scrapeline capture {sid}) and run the generator agent: scrapeline agent generate "
+        f"--instruction <instruction file> --pages data/samples/{sid}."
+    )
+    if ins.crawl.pagination == "auto":
+        steps.append(
+            "Pagination 'auto' was compiled as next-link: point next_page at the next-page "
+            "link, or remove it and set pagination: none."
+        )
+    if ins.crawl.pagination == "load-more" and ins.crawl.render != "always":
+        steps.append("Load-more pagination needs a browser: set crawl.render to always.")
+    if ins.crawl.follow_detail_pages:
+        steps.append(
+            "The skeleton reads list pages only; following detail pages needs the generator "
+            "agent or a hand-written parse.py."
+        )
+    if len(ins.start_urls) > 1:
+        steps.append(
+            "Only the first start URL is crawled; the others are kept in options.extra_start_urls."
+        )
+    if ins.documents != "ignore":
+        steps.append(
+            f"Documents are set to '{ins.documents}': list the document link fields under "
+            "`documents` in the spec."
+        )
+    pii = [n for n, f in wanted.items() if f.pii]
+    if pii:
+        retention = (
+            f"retention is {ins.usage.retention_days} days"
+            if ins.usage.retention_days
+            else "set usage.retention_days"
+        )
+        steps.append(
+            f"Personal-data fields {pii} will be stored: confirm the stated purpose and "
+            f"licence; {retention}."
+        )
+    steps += [
+        f"Review the terms of use and robots.txt of {', '.join(source.hosts)}; record the "
+        "review date in legal.terms_checked and why collecting is allowed in legal.notes.",
+        f"Draft live run: scrapeline source sync, then scrapeline run {sid}; check the sample "
+        "rows and the quality checks.",
+        f"Activate: scrapeline source set-status {sid} active.",
+    ]
+    if ins.schedule == "manual":
+        steps.append(
+            f"Schedule is manual: the scheduler never enqueues {sid}; run it with "
+            f"scrapeline run {sid}."
+        )
+    return steps
+
+
+def render_source_yaml(source: SourceConfig) -> str:
+    """Source config as YAML. safe_dump quotes untrusted text, so it cannot add keys."""
+    data = source.model_dump(mode="json", by_alias=True, exclude_none=True)
+    if source.watermark == WatermarkConfig():
+        data.pop("watermark")
+    if not source.options:
+        data.pop("options")
+    header = (
+        "# Draft source compiled from a scrape instruction. It stays draft until a human\n"
+        "# completes the next steps printed by `scrapeline instruction apply`.\n"
+    )
+    return header + yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+
+
+def render_dataset_yaml(dataset: DatasetType) -> str:
+    fields = {
+        name: {"type": f.type, **f.model_dump(mode="json", exclude_defaults=True, exclude={"type"})}
+        for name, f in dataset.fields.items()
+    }
+    data: dict[str, Any] = {
+        "name": dataset.name,
+        "version": dataset.version,
+        "pack": dataset.pack,
+        "description": dataset.description,
+    }
+    if dataset.canonical_url_field:
+        data["canonical_url_field"] = dataset.canonical_url_field
+    data["fields"] = fields
+    header = "# User dataset type proposed by a scrape instruction. A human approves it.\n"
+    return header + yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
