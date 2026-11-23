@@ -1,0 +1,10 @@
+scrapeline:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('WAREHOUSE_PATH', 'data/warehouse.duckdb') }}"
+      threads: 4
+      settings:
+        # Lake timestamps are UTC and `date` partitions are UTC dates.
+        TimeZone: UTC

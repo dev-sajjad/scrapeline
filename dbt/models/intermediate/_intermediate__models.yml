@@ -1,0 +1,18 @@
+version: 2
+
+models:
+  - name: int_record_versions
+    description: >
+      Record versions as SCD type 2 intervals: each version is valid from `valid_from` until
+      the next version's `valid_from` (`valid_to`, exclusive; empty while current).
+    columns:
+      - name: version_id
+        data_tests: [unique, not_null]
+      - name: valid_to
+        description: Start of the next version; empty for the current version.
+      - name: is_current
+        description: True for the record's latest version.
+        data_tests: [not_null]
+      - name: is_removed
+        description: True when this version records the record's removal.
+        data_tests: [not_null]
