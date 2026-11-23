@@ -1,0 +1,67 @@
+# Compiled from config/instructions/books-toscrape.yaml; spec completed and terms reviewed by
+# hand. Stays draft until a live run has been checked.
+id: books-toscrape
+name: Books to Scrape catalogue
+platform: custom
+kind: html
+entry: https://books.toscrape.com/
+allowed_hosts:
+- books.toscrape.com
+cadence: daily
+politeness:
+  rps: 1.0
+  concurrency: 1
+  respect_robots: true
+legal:
+  terms_checked: '2026-11-24'
+  notes: >-
+    A public sandbox built for scraping practice; every page says "This is a demo website
+    for web scraping purposes. Prices and ratings here were randomly assigned and have no
+    real meaning." robots.txt, fetched through FetchClient on 2026-11-23 (UTC), returns
+    404: no crawl rules and no crawl delay, so the catalogue pages are allowed. No terms of
+    use page is linked. Only catalogue listing fields are collected; there is no personal
+    data on these pages. One request per second.
+schema: product
+dataset: product
+locale:
+  language: en-GB
+  timezone: Europe/London
+  currency: GBP
+  decimal_separator: .
+usage:
+  purpose: Track how book prices and stock change over time.
+  allow_pii: false
+  retention_days: 365
+adapter: scrapeline.adapters.declarative:DeclarativeAdapter
+status: draft
+config_version: 1
+owner: instruction
+pagination: next-link
+max_pages_per_run: 60
+quality:
+  # The catalogue lists 1000 books on 50 pages.
+  min_records: 900
+  max_records: 1100
+  max_reject_rate: 0.05
+  max_null_rate:
+    url: 0.0
+    title: 0.0
+    price: 0.0
+    in_stock: 0.0
+    rating: 0.0
+instruction:
+  collect: 'Every book in the catalogue: title, current price, whether it is in stock,
+    star rating, cover image and the product page link. Follow the "next" link through
+    every catalogue page.'
+  schema: product
+  pagination: next-link
+  documents: ignore
+  max_pages_per_run: 60
+  fields_excluded:
+  - list_price
+  - stock_quantity
+  - sku
+  - brand
+  - category
+  - review_count
+  - description

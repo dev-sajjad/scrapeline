@@ -1,0 +1,17 @@
+# Site adapter for books.toscrape.com catalogue pages (20 books per page, 50 pages).
+# Compiled from config/instructions/books-toscrape.yaml; selectors completed by hand.
+spec_version: 1
+schema: product
+record: article.product_pod
+fields:
+  url:          {css: h3 a, attr: href}
+  # The link text is truncated ("A Light in the ..."); the title attribute holds the full title.
+  title:        {css: h3 a, attr: title}
+  price:        {css: p.price_color}
+  in_stock:     {css: p.availability, map: {"In stock": true, "Out of stock": false}}
+  availability: {css: p.availability, optional: true}
+  # The rating is only in the class list: <p class="star-rating Three">.
+  rating:       {css: p.star-rating, attr: class, pattern: 'star-rating (One|Two|Three|Four|Five)\b',
+                 map: {One: 1.0, Two: 2.0, Three: 3.0, Four: 4.0, Five: 5.0}}
+  image_url:    {css: div.image_container img, attr: src, optional: true}
+next_page: {css: li.next a, attr: href}
