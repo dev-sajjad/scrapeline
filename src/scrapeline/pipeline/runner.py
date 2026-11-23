@@ -1,6 +1,9 @@
 """Run one source end to end: discover -> fetch -> raw -> parse -> validate -> load -> checks.
 
 Deterministic, no LLM. Failures are recorded (ops.run, raw.fetch_log, ops.incident), never hidden.
+Records of the source's generic dataset go to the record store, which keeps their history;
+typed record types (meetings, bodies, ...) go to their own tables. Progress is published as
+events, and a failing event bus never fails a run.
 """
 
 from __future__ import annotations
@@ -14,14 +17,17 @@ from datetime import datetime, timedelta
 from typing import Any, Literal
 
 import httpx
-from sqlalchemy import Engine, select
+from sqlalchemy import Connection, Engine, select
 
 from scrapeline.adapters.base import Adapter, Window, adapter_code_hash, load_adapter
 from scrapeline.adapters.rawdoc import ParseResult, RawDoc, Reject, Target
+from scrapeline.catalog.datasets import DatasetType, default_registry
+from scrapeline.catalog.repository import ensure_dataset_type
 from scrapeline.errors import (
     BlockedError,
     CircuitOpenError,
     ConfigError,
+    DatasetError,
     FetchError,
     ParseError,
     RobotsDisallowedError,
@@ -32,10 +38,18 @@ from scrapeline.fetch.client import CircuitBreaker, FetchClient, FetchEvent, Fet
 from scrapeline.fetch.limiter import HostRateLimiter
 from scrapeline.fetch.urlpolicy import Resolver, URLPolicy, system_resolver
 from scrapeline.ops import runs
+from scrapeline.ops.events import Event, EventBus, EventLevel, PostgresEventBus
 from scrapeline.ops.logging import bind_context, get_logger
-from scrapeline.pipeline.load import LoadContext, Provenance, dedupe_latest, load_records
-from scrapeline.pipeline.models import SCHEMAS, Record
-from scrapeline.quality.checks import CheckResult, run_checks, worst
+from scrapeline.pipeline.load import (
+    TABLE_FOR,
+    LoadContext,
+    Provenance,
+    dedupe_latest,
+    load_records,
+)
+from scrapeline.pipeline.models import Record
+from scrapeline.pipeline.records import PostgresRecordStore, RecordStore
+from scrapeline.quality.checks import CheckResult, CheckStatus, run_checks, worst
 from scrapeline.quality.incidents import close_incidents, open_incident
 from scrapeline.registry.config import SourceConfig, load_sources
 from scrapeline.settings import Settings
@@ -60,11 +74,71 @@ class RunSummary:
     checks: dict[str, str] = field(default_factory=dict)
     watermark: str | None = None
     truncated: bool = False
+    complete: bool = False
+    removed: int = 0
     error: str | None = None
     incident_id: int | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {k: (str(v) if isinstance(v, uuid.UUID) else v) for k, v in self.__dict__.items()}
+
+
+def is_complete_crawl(
+    kind: str,
+    *,
+    windowed: bool,
+    truncated: bool,
+    failed_fetches: int,
+    rejects: int,
+    verdict: CheckStatus,
+) -> bool:
+    """Whether a run saw everything the source lists, so an identity it did not see is gone.
+
+    Only a full incremental crawl qualifies: every page reached (page limit not hit, no page
+    that failed to fetch), no rejects, no time window narrowing what was listed, and no
+    failed quality check, so zero rows from a broken parser never empty the history.
+    """
+    return (
+        kind == "incremental"
+        and not windowed
+        and not truncated
+        and failed_fetches == 0
+        and rejects == 0
+        and verdict != "fail"
+    )
+
+
+Items = list[tuple[Record, Provenance]]
+
+
+def split_by_storage(dataset: DatasetType, items: Items) -> tuple[Items, Items]:
+    """(records for the generic record store, records for typed tables).
+
+    A record type that is neither the source's generic dataset nor a typed table is a parser
+    bug, and raises DatasetError rather than being dropped.
+    """
+    generic: Items = []
+    typed: Items = []
+    unknown: set[str] = set()
+    for rec, prov in items:
+        if dataset.storage == "generic" and rec.record_type == dataset.name:
+            generic.append((rec, prov))
+        elif rec.record_type in TABLE_FOR:
+            typed.append((rec, prov))
+        else:
+            unknown.add(rec.record_type)
+    if unknown:
+        raise DatasetError(
+            f"parser produced {sorted(unknown)} records; the source's dataset is {dataset.name}"
+        )
+    return generic, typed
+
+
+def _failed_fetches(rows: list[dict[str, Any]]) -> int:
+    """URLs that were never fetched; a failed attempt followed by a successful retry is fine."""
+    fetched = {r["url"] for r in rows if r.get("raw_key")}
+    failed = {r["url"] for r in rows if r["error"] or (r["status"] or 0) >= 400}
+    return len(failed - fetched)
 
 
 @dataclass
@@ -92,6 +166,9 @@ class Runner:
         resolver: Resolver = system_resolver,
         sleep: Callable[[float], None] = time.sleep,
         sources: dict[str, SourceConfig] | None = None,
+        adapter_factory: Callable[[SourceConfig], Adapter] = load_adapter,
+        event_bus: EventBus | None = None,
+        record_store: RecordStore | None = None,
     ) -> None:
         self.settings = settings
         self.engine = engine
@@ -100,6 +177,9 @@ class Runner:
         self.resolver = resolver
         self.sleep = sleep
         self._sources = sources
+        self.adapter_factory = adapter_factory
+        self.event_bus: EventBus = event_bus if event_bus is not None else PostgresEventBus(engine)
+        self.record_store: RecordStore = record_store or PostgresRecordStore()
         self._browser: BrowserPool | None = None
 
     def source(self, source_id: str) -> SourceConfig:
@@ -118,7 +198,7 @@ class Runner:
         force: bool = False,
     ) -> RunSummary:
         cfg = self.source(source_id)
-        adapter = load_adapter(cfg)
+        adapter = self.adapter_factory(cfg)
         with self.engine.connect() as lock_conn:
             if not runs.try_source_lock(lock_conn, cfg.id):
                 raise ConfigError(f"another run of {cfg.id} is in progress")
@@ -134,9 +214,9 @@ class Runner:
     def reprocess(self, source_id: str, *, since: datetime | None = None) -> RunSummary:
         """Rebuild normalised rows from stored raw (after a parser or schema change)."""
         cfg = self.source(source_id)
-        adapter = load_adapter(cfg)
+        adapter = self.adapter_factory(cfg)
         with self.engine.begin() as conn:
-            self._prepare(conn, cfg, force=True)
+            dataset = self._prepare(conn, cfg, force=True)
             version_id = runs.scraper_version(
                 conn, cfg.id, cfg.adapter, adapter_code_hash(adapter), cfg.owner
             )
@@ -161,6 +241,7 @@ class Runner:
                 query = query.where(t.fetch_log.c.fetched_at >= since)
             log_rows = conn.execute(query).fetchall()
         summary = RunSummary(run_id=run_id, source_id=cfg.id, kind="reprocess")
+        self._emit(summary, "run.started", "reprocess from raw", {"kind": "reprocess"})
         collected = _Collected()
         seen: set[str] = set()
         with bind_context(run_id=str(run_id), source_id=cfg.id):
@@ -186,7 +267,14 @@ class Runner:
             except ScrapelineError as exc:
                 return self._fail(cfg, summary, collected, exc)
             return self._finish(
-                cfg, summary, collected, version_id, zero_is_ok=False, advance_watermark=False
+                cfg,
+                dataset,
+                summary,
+                collected,
+                version_id,
+                zero_is_ok=False,
+                advance_watermark=False,
+                windowed=since is not None,
             )
 
     def latest_raw_docs(self, source_id: str) -> list[RawDoc]:
@@ -226,10 +314,14 @@ class Runner:
             for r in rows
         ]
 
-    def _prepare(self, conn: Any, cfg: SourceConfig, *, force: bool) -> None:
+    def _prepare(self, conn: Connection, cfg: SourceConfig, *, force: bool) -> DatasetType:
+        """Sync the source row and its dataset type; return the dataset its records belong to."""
+        dataset = default_registry().get(cfg.dataset_name)
         status = runs.sync_source(conn, cfg)
         if status in ("retired", "broken") and not force:
             raise ConfigError(f"source {cfg.id} is {status}; use --force to run anyway")
+        ensure_dataset_type(conn, dataset)
+        return dataset
 
     def _client(self, cfg: SourceConfig, events: list[FetchEvent]) -> FetchClient:
         limiter = HostRateLimiter(cfg.politeness.rps, sleep=self.sleep)
@@ -262,7 +354,7 @@ class Runner:
         force: bool,
     ) -> RunSummary:
         with self.engine.begin() as conn:
-            self._prepare(conn, cfg, force=force)
+            dataset = self._prepare(conn, cfg, force=force)
             version_id = runs.scraper_version(
                 conn, cfg.id, cfg.adapter, adapter_code_hash(adapter), cfg.owner
             )
@@ -280,6 +372,12 @@ class Runner:
         window = Window(since=since, until=until, backfill=kind == "backfill")
         zero_is_ok = kind == "incremental" and stored is not None
         summary = RunSummary(run_id=run_id, source_id=cfg.id, kind=kind)
+        window_data = {
+            "kind": kind,
+            "since": since.isoformat() if since else None,
+            "until": until.isoformat() if until else None,
+        }
+        self._emit(summary, "run.started", f"{kind} run", window_data)
         collected = _Collected()
         events: list[FetchEvent] = []
 
@@ -296,11 +394,13 @@ class Runner:
             self._drain_events(cfg, run_id, events, collected)
             return self._finish(
                 cfg,
+                dataset,
                 summary,
                 collected,
                 version_id,
                 zero_is_ok=zero_is_ok,
                 advance_watermark=kind == "incremental" and not summary.truncated,
+                windowed=since is not None or until is not None,
             )
 
     def _crawl(
@@ -462,46 +562,73 @@ class Runner:
     def _finish(
         self,
         cfg: SourceConfig,
+        dataset: DatasetType,
         summary: RunSummary,
         collected: _Collected,
         version_id: int,
         *,
         zero_is_ok: bool,
         advance_watermark: bool,
+        windowed: bool,
     ) -> RunSummary:
+        try:
+            generic, typed = split_by_storage(dataset, collected.items)
+        except DatasetError as exc:
+            return self._fail(cfg, summary, collected, exc)
+
         latest = dedupe_latest(collected.items)
         records = [rec for pairs in latest.values() for rec, _ in pairs]
         rejects = [rej for rej, _ in collected.rejects]
         per_raw = Counter(
             (prov.raw_sha256, rec.record_type, rec.external_id) for rec, prov in collected.items
         )
-        primary = SCHEMAS[cfg.schema_].record_type
-        dup_within_raw = sum(n - 1 for (_, rtype, _), n in per_raw.items() if rtype == primary)
+        dup_within_raw = sum(n - 1 for (_, rtype, _), n in per_raw.items() if rtype == dataset.name)
         checks: list[CheckResult] = run_checks(
             records,
             rejects,
             cfg.quality,
-            schema=cfg.schema_,
+            dataset=dataset,
             zero_is_ok=zero_is_ok,
             duplicates_within_raw=dup_within_raw,
         )
         verdict = worst(checks)
+        failed = [c.name for c in checks if c.status == "fail"]
         for rec in records:
             summary.records[rec.record_type] = summary.records.get(rec.record_type, 0) + 1
         summary.rejects = len(rejects)
         summary.checks = {c.name: c.status for c in checks}
         summary.status = "failed" if verdict == "fail" else "succeeded"
+        summary.complete = is_complete_crawl(
+            summary.kind,
+            windowed=windowed,
+            truncated=summary.truncated,
+            failed_fetches=_failed_fetches(collected.fetch_rows),
+            rejects=len(rejects),
+            verdict=verdict,
+        )
 
         with self.engine.begin() as conn:
             self._write_common(conn, cfg, summary.run_id, collected)
+            started_at = conn.execute(
+                select(t.run.c.started_at).where(t.run.c.id == summary.run_id)
+            ).scalar_one()
             ctx = LoadContext(
                 cfg.id,
                 cfg.jurisdiction.id if cfg.jurisdiction else None,
                 summary.run_id,
                 version_id,
+                run_started_at=started_at,
+                usage=cfg.usage,
             )
-            stats = load_records(conn, ctx, collected.items)
-            summary.loaded = {k: v.as_dict() for k, v in stats.items()}
+            loaded = {k: v.as_dict() for k, v in load_records(conn, ctx, typed).items()}
+            if dataset.storage == "generic":
+                stats = self.record_store.load(conn, ctx, dataset, generic)
+                if summary.complete:
+                    seen = {rec.external_id for rec, _ in generic}
+                    stats.removed = self.record_store.mark_removed(conn, ctx, dataset, seen)
+                loaded[dataset.name] = stats.as_dict()
+                summary.removed = stats.removed
+            summary.loaded = loaded
             conn.execute(
                 t.check_result.insert(),
                 [
@@ -518,7 +645,6 @@ class Runner:
                 ],
             )
             if verdict == "fail":
-                failed = [c.name for c in checks if c.status == "fail"]
                 summary.incident_id = open_incident(
                     conn,
                     source_id=cfg.id,
@@ -537,7 +663,36 @@ class Runner:
                 conn, summary.run_id, status=summary.status, stats=summary.as_dict(), error=None
             )
         log.info("run.finish", **{k: v for k, v in summary.as_dict().items() if k != "run_id"})
+        self._publish_finish(dataset, summary, checks)
         return summary
+
+    def _publish_finish(
+        self, dataset: DatasetType, summary: RunSummary, checks: list[CheckResult]
+    ) -> None:
+        for name, counts in summary.loaded.items():
+            generic = dataset.storage == "generic" and name == dataset.name
+            message = f"{name}: " + ", ".join(f"{n} {change}" for change, n in counts.items())
+            data = {"dataset": name, "storage": "generic" if generic else "typed", **counts}
+            self._emit(summary, "records.loaded", message, data)
+        verdict = worst(checks)
+        failed = [c.name for c in checks if c.status == "fail"]
+        tally = Counter(c.status for c in checks)
+        self._emit(
+            summary,
+            "checks.done",
+            f"checks {verdict}",
+            {
+                "verdict": verdict,
+                "failed": failed,
+                **{s: tally[s] for s in ("pass", "warn", "fail")},
+            },
+            level=_LEVEL_FOR[verdict],
+        )
+        if summary.status == "failed":
+            message = f"quality checks failed: {', '.join(failed)}"
+            self._emit(summary, "run.failed", message, self._outcome(summary), level="error")
+        else:
+            self._emit(summary, "run.finished", "run succeeded", self._outcome(summary))
 
     def _fail(
         self, cfg: SourceConfig, summary: RunSummary, collected: _Collected, exc: Exception
@@ -567,4 +722,38 @@ class Runner:
                 conn, summary.run_id, status="failed", stats=summary.as_dict(), error=summary.error
             )
         log.error("run.failed", error=summary.error, incident_id=summary.incident_id)
+        self._emit(summary, "run.failed", summary.error, self._outcome(summary), level="error")
         return summary
+
+    @staticmethod
+    def _outcome(summary: RunSummary) -> dict[str, Any]:
+        # The event itself carries the ids; loads and checks have their own events.
+        elsewhere = {"run_id", "source_id", "loaded", "checks"}
+        return {k: v for k, v in summary.as_dict().items() if k not in elsewhere}
+
+    def _emit(
+        self,
+        summary: RunSummary,
+        kind: str,
+        message: str,
+        data: dict[str, Any],
+        *,
+        level: EventLevel = "info",
+    ) -> None:
+        """Publish one event about this run; a failing bus is logged, never raised."""
+        try:
+            self.event_bus.publish(
+                Event(
+                    kind=kind,
+                    message=message,
+                    level=level,
+                    source_id=summary.source_id,
+                    run_id=summary.run_id,
+                    data=data,
+                )
+            )
+        except Exception as exc:  # events are observability, never a reason to fail a run
+            log.warning("event.publish_failed", kind=kind, error=repr(exc))
+
+
+_LEVEL_FOR: dict[CheckStatus, EventLevel] = {"pass": "info", "warn": "warning", "fail": "error"}
