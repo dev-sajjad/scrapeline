@@ -1,14 +1,21 @@
 """Deterministic tester (no LLM). The only judge of agent output.
 
-Stages: (1) static: spec schema validation / AST security check for python;
-(2) sandbox: parse sample pages offline (`docker run --network none ...`);
+Stages: (1) static: spec schema validation, field pattern safety, AST security check for
+python; (2) sandbox: parse sample pages offline (`docker run --network none ...`);
 (3) golden: compare records with human-owned expected rows. Output: machine-readable report.
+
+The sandbox reads the pages under a locale and receives the dataset definition, so
+user-defined dataset types work there too. The locale is the explicit one, else the source's
+config, else (only when the caller marks a benchmark case) the static-list fixture's, else
+strict `Locale()`, the same default a new source runs with. The report records the locale
+and where it came from, so a reviewer sees what the spec was tested under.
 """
 
 from __future__ import annotations
 
 import ast
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -17,15 +24,23 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from scrapeline.adapters.declarative import SiteSpec
+from scrapeline.adapters.declarative import SiteSpec, resolve_dataset
 from scrapeline.agents import sandbox_harness
+from scrapeline.catalog.datasets import DatasetType
 from scrapeline.errors import ConfigError
-from scrapeline.pipeline.models import SCHEMAS
+from scrapeline.pipeline.locale import Locale
 from scrapeline.quality.golden import compare, load_golden
+from scrapeline.registry.config import SourceConfig, load_source_file
 from scrapeline.settings import PROJECT_ROOT, Settings
 
 SandboxMode = Literal["docker", "local"]
+LocaleOrigin = Literal["explicit", "source", "benchmark", "strict default"]
 PAGE_URL_PREFIX = "/static-list/"  # drift cases keep the original URL layout
+CASE_SOURCE_ID = "fixture-static-list"  # benchmark pages are copies of this fixture site
+EXCLUDED_FIELDS = frozenset({"attendees", "contact_email", "phone", "signatures"})
+# Field patterns run on untrusted page text in the trusted worker, where no time limit applies.
+MAX_PATTERN_CHARS = 200
+_QUANTIFIER = re.compile(r"(?:[*+?]|\{\d*(?:,\d*)?\})[?+]?")
 
 ALLOWED_IMPORTS = frozenset(
     {
@@ -81,6 +96,8 @@ class TesterReport:
     pages_parsed: int = 0
     sandbox_mode: str = "docker"
     duration_ms: int = 0
+    locale: dict[str, Any] = field(default_factory=dict)
+    locale_origin: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -96,6 +113,8 @@ class TesterReport:
             "records": self.records,
             "rejects": self.rejects,
             "pages_parsed": self.pages_parsed,
+            "locale": self.locale,
+            "locale_origin": self.locale_origin,
             "golden": {
                 k: g.get(k)
                 for k in (
@@ -144,22 +163,131 @@ def security_check_python(code: str) -> list[str]:
     return findings
 
 
-def _spec_security(spec_yaml: str) -> list[str]:
+def _repeats(quantifier: str) -> bool:
+    """True for a quantifier that allows more than one repetition ('+', '*', '{2,}')."""
+    if quantifier[0] in "*+":
+        return True
+    if quantifier[0] == "?":
+        return False
+    low, comma, high = quantifier[1 : quantifier.index("}")].partition(",")
+    if not comma:
+        return int(low or 0) > 1
+    return not high or int(high) > 1
+
+
+def _class_end(pattern: str, start: int) -> int:
+    """Index just after the character class that opens at `start`."""
+    i = start + 1
+    if pattern.startswith("^", i):
+        i += 1
+    if pattern.startswith("]", i):
+        i += 1
+    while i < len(pattern) and pattern[i] != "]":
+        i += 2 if pattern[i] == "\\" else 1
+    return i + 1
+
+
+def has_nested_quantifier(pattern: str) -> bool:
+    """A repeated group that contains a repeat: '(a+)+', '(.*)*', '(\\w+\\s?)+$'.
+
+    These backtrack exponentially on text that almost matches. The scan is deliberately
+    simple and also refuses some safe patterns such as '(?:\\d+,)*'.
+    """
+    open_groups: list[bool] = []  # per open group: whether it contains a repeat
+    i = 0
+    while i < len(pattern):
+        char = pattern[i]
+        group_repeats = False
+        if char == "\\":
+            i += 2
+        elif char == "[":
+            i = _class_end(pattern, i)
+        elif char == "(":
+            open_groups.append(False)
+            i += 1
+            continue
+        elif char == ")":
+            group_repeats = open_groups.pop() if open_groups else False
+            if open_groups:
+                open_groups[-1] = open_groups[-1] or group_repeats
+            i += 1
+        else:
+            i += 1
+        quantifier = _QUANTIFIER.match(pattern, i)
+        if quantifier is None:
+            continue
+        if _repeats(quantifier.group()):
+            if group_repeats:
+                return True
+            if open_groups:
+                open_groups[-1] = True
+        i = quantifier.end()
+    return False
+
+
+def pattern_problems(pattern: str) -> list[str]:
+    """Why a field `pattern` is unsafe to run on untrusted text without a time limit."""
+    problems = []
+    if len(pattern) > MAX_PATTERN_CHARS:
+        problems.append(f"pattern longer than {MAX_PATTERN_CHARS} characters")
+    if has_nested_quantifier(pattern):
+        problems.append(f"pattern {pattern[:80]!r} repeats a group that repeats (backtracking)")
+    return problems
+
+
+def source_config(settings: Settings, source_id: str | None) -> SourceConfig | None:
+    """Config of a registered source; None for a new or unknown source."""
+    if not source_id:
+        return None
+    path = settings.sources_dir / f"{source_id}.yaml"
+    return load_source_file(path) if path.exists() else None
+
+
+def resolve_locale(
+    settings: Settings,
+    source_id: str | None,
+    locale: Locale | None = None,
+    *,
+    benchmark: bool = False,
+) -> tuple[Locale, LocaleOrigin]:
+    """The locale a spec is tested under and where it came from (see the module docstring)."""
+    if locale is not None:
+        return locale, "explicit"
+    if (source := source_config(settings, source_id)) is not None:
+        return source.locale, "source"
+    if benchmark and (case := source_config(settings, CASE_SOURCE_ID)) is not None:
+        return case.locale, "benchmark"
+    return Locale(), "strict default"
+
+
+def _spec_security(
+    spec_yaml: str, dataset: DatasetType | None, source: SourceConfig | None
+) -> list[str]:
     findings = []
     if len(spec_yaml) > 20_000:
         findings.append("spec too large (>20k chars)")
     try:
-        spec = SiteSpec.from_yaml(spec_yaml)
+        spec = SiteSpec.from_yaml(spec_yaml, dataset=dataset)
+        dataset = resolve_dataset(spec.schema_, dataset)
     except ConfigError as exc:
         return [str(exc)[:500]]
-    excluded = {"attendees", "contact_email", "phone", "signatures"}
-    leaked = excluded & set(spec.fields)
+    for name, field_spec in spec.fields.items():
+        if field_spec.pattern is not None:
+            findings += [f"{name}: {p}" for p in pattern_problems(field_spec.pattern)]
+    leaked = EXCLUDED_FIELDS & set(spec.fields)
     if leaked:
         findings.append(f"excluded personal-data fields requested: {sorted(leaked)}")
+    personal = set(dataset.pii_fields) & set(spec.fields)
+    if personal and not (source is not None and source.usage.allow_pii):
+        findings.append(
+            f"personal-data fields {sorted(personal)} need usage.allow_pii on the source"
+        )
     return findings
 
 
-def _prepare_workdir(spec_yaml: str, pages_dir: Path, base_url: str) -> Path:
+def _prepare_workdir(
+    spec_yaml: str, pages_dir: Path, base_url: str, locale: Locale, dataset: DatasetType
+) -> Path:
     scratch = PROJECT_ROOT / "data" / "sandbox"
     scratch.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="case-", dir=scratch))
@@ -169,9 +297,15 @@ def _prepare_workdir(spec_yaml: str, pages_dir: Path, base_url: str) -> Path:
         shutil.copy2(f, work / f.name)
         url = f"{base_url}{PAGE_URL_PREFIX}{'' if f.name == 'index.html' else f.name}"
         pages.append({"file": f.name, "url": url})
-    (work / "input.json").write_text(
-        json.dumps({"spec_yaml": spec_yaml, "base_url": base_url, "pages": pages, "max_pages": 10})
-    )
+    spec_input = {
+        "spec_yaml": spec_yaml,
+        "base_url": base_url,
+        "pages": pages,
+        "max_pages": 10,
+        "locale": locale.model_dump(mode="json"),
+        "dataset": dataset.model_dump(mode="json"),
+    }
+    (work / "input.json").write_text(json.dumps(spec_input))
     work.chmod(0o755)
     for p in work.iterdir():
         p.chmod(0o644)
@@ -229,18 +363,30 @@ def evaluate_spec(
     mode: SandboxMode = "docker",
     base_url: str = "http://localhost:8080",
     min_records: int = 1,
+    source_id: str | None = None,
+    locale: Locale | None = None,
+    dataset: DatasetType | None = None,
+    benchmark: bool = False,
 ) -> TesterReport:
     """Golden mode when `golden_path` is given; otherwise self-consistency mode for new sites
     (records on every parsed page, all sample pages reached, no rejects/errors, unique ids,
     canonical ids not synthesized for most rows). Self-consistency is weaker evidence than
-    golden rows; a human still checks sample rows in the PR."""
+    golden rows; a human still checks sample rows in the PR.
+
+    The locale comes from `resolve_locale` (`benchmark` marks pages copied from the
+    static-list fixture). The dataset is `dataset`, else the registry entry the spec names.
+    """
     started = time.monotonic()
     report = TesterReport(passed=False, stage="static", sandbox_mode=mode)
-    report.security = _spec_security(spec_yaml)
+    locale, origin = resolve_locale(settings, source_id, locale, benchmark=benchmark)
+    report.locale, report.locale_origin = locale.model_dump(mode="json"), origin
+    report.security = _spec_security(spec_yaml, dataset, source_config(settings, source_id))
     if report.security:
         report.duration_ms = int((time.monotonic() - started) * 1000)
         return report
-    work = _prepare_workdir(spec_yaml, pages_dir, base_url)
+    spec = SiteSpec.from_yaml(spec_yaml, dataset=dataset)
+    dataset = resolve_dataset(spec.schema_, dataset)
+    work = _prepare_workdir(spec_yaml, pages_dir, base_url, locale, dataset)
     try:
         report.stage = "sandbox"
         out = _run_sandbox(work, settings, mode)
@@ -249,8 +395,7 @@ def evaluate_spec(
     report.errors = out.get("errors", [])
     report.pages_parsed = int(out.get("pages_parsed", 0))
     report.rejects = len(out.get("rejects", []))
-    spec = SiteSpec.from_yaml(spec_yaml)
-    model = SCHEMAS[spec.schema_]
+    model = dataset.record_model()
     records = []
     for row in out.get("records", []):
         if row.get("record_type") != model.record_type:

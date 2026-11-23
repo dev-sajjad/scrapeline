@@ -117,7 +117,10 @@ def repair_case(
     )
     case_id = case_dir.name
 
-    before = evaluate_spec(original, case_dir, golden_path, settings, mode=sandbox_mode)
+    # The source's own locale, as in the agent's tools and the live run after merge.
+    before = evaluate_spec(
+        original, case_dir, golden_path, settings, mode=sandbox_mode, source_id=source_id
+    )
     acc_before = float(before.golden.get("field_accuracy", 0.0))
     if before.passed:
         log.info("repair.not_needed", source_id=source_id, case=case_id)
@@ -165,7 +168,9 @@ def repair_case(
         out = driver(system=system, user=feedback, tools=tools, max_iterations=MAX_ITERATIONS)
         candidate = ws.spec_path.read_text()
         # Re-test independently: the agent's own claim is not evidence.
-        final = evaluate_spec(candidate, case_dir, golden_path, settings, mode=sandbox_mode)
+        final = evaluate_spec(
+            candidate, case_dir, golden_path, settings, mode=sandbox_mode, source_id=source_id
+        )
         outcome = (
             "passed"
             if final.passed

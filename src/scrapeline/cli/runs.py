@@ -50,7 +50,7 @@ def reprocess(
 def verify(source_id: str) -> None:
     """Parse the latest run's raw docs offline and compare with golden rows (deterministic)."""
     from scrapeline.adapters.base import load_adapter
-    from scrapeline.pipeline.models import SCHEMAS
+    from scrapeline.catalog.datasets import resolve_model
     from scrapeline.quality.golden import compare, load_golden
     from scrapeline.settings import PROJECT_ROOT, get_settings
 
@@ -61,7 +61,7 @@ def verify(source_id: str) -> None:
     if not golden_path.exists():
         raise typer.BadParameter(f"no golden file {golden_path}")
     adapter = load_adapter(cfg)
-    model = SCHEMAS[cfg.schema_]
+    model = resolve_model(cfg.dataset_name)
     records = [
         rec
         for raw in runner.latest_raw_docs(source_id)

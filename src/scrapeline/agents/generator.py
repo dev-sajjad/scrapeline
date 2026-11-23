@@ -23,6 +23,7 @@ from scrapeline.agents.repairer import _claimed_success, commit_on_agent_branch
 from scrapeline.agents.tester import SandboxMode, evaluate_spec
 from scrapeline.agents.tools import Workspace, as_beta_tools, build_tool_functions
 from scrapeline.ops.logging import get_logger
+from scrapeline.pipeline.locale import Locale
 from scrapeline.settings import PROJECT_ROOT, Settings
 
 log = get_logger(__name__)
@@ -75,7 +76,15 @@ def generate_site(
     eval_run_id: uuid.UUID | None = None,
     apply: bool = False,
     source_yaml: str | None = None,
+    locale: Locale | None = None,
+    benchmark: bool = False,
 ) -> GenerationResult:
+    """Generate a spec for `source_id` from captured pages and test it independently.
+
+    Every tester run uses the same locale as the agent's tools: `locale`, else the source's
+    config, else strict `Locale()` (what a new source runs with). `benchmark` marks eval
+    cases whose pages are copies of the static-list fixture; they use that fixture's locale.
+    """
     prompt_version, system = load_prompt("generator", PROMPT_VERSION)
     run_log = AgentRunLog(
         engine, "generate", source_id, prompt_version, pages_dir.name, eval_run_id
@@ -93,12 +102,31 @@ def generate_site(
         root = PROJECT_ROOT / "data" / "agent" / f"gen-{source_id}-{uuid.uuid4().hex[:8]}"
         root.mkdir(parents=True, exist_ok=True)
         (root / "spec.yaml").write_text(candidate)
-        ws = Workspace(source_id, root, pages_dir, None, instruction, settings, sandbox_mode)
+        ws = Workspace(
+            source_id,
+            root,
+            pages_dir,
+            None,
+            instruction,
+            settings,
+            sandbox_mode,
+            locale=locale,
+            benchmark=benchmark,
+        )
         functions = build_tool_functions(ws)
         tools = as_beta_tools(functions) if driver.name == "anthropic" else list(functions.values())
         out = driver(system=system, user=feedback, tools=tools, max_iterations=MAX_ITERATIONS)
         candidate = ws.spec_path.read_text()
-        final = evaluate_spec(candidate, pages_dir, None, settings, mode=sandbox_mode)
+        final = evaluate_spec(
+            candidate,
+            pages_dir,
+            None,
+            settings,
+            mode=sandbox_mode,
+            source_id=source_id,
+            locale=locale,
+            benchmark=benchmark,
+        )
         outcome = (
             "passed"
             if final.passed
@@ -137,7 +165,14 @@ def generate_site(
 
     if golden_for_grading is not None and result.final_spec is not None:
         graded = evaluate_spec(
-            result.final_spec, pages_dir, golden_for_grading, settings, mode=sandbox_mode
+            result.final_spec,
+            pages_dir,
+            golden_for_grading,
+            settings,
+            mode=sandbox_mode,
+            source_id=source_id,
+            locale=locale,
+            benchmark=benchmark,
         )
         result.graded = True
         result.golden_passed = graded.passed

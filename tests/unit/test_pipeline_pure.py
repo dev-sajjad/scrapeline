@@ -7,6 +7,7 @@ import pytest
 
 from scrapeline.adapters.rawdoc import ParseResult
 from scrapeline.pipeline.identity import content_hash, meeting_natural_key
+from scrapeline.pipeline.locale import Locale
 from scrapeline.pipeline.models import Meeting
 from scrapeline.pipeline.normalise import absolute_url, clean_text, parse_date, parse_time
 from scrapeline.quality.antibot import BlockKind, classify
@@ -28,7 +29,7 @@ from scrapeline.store.raw import FilesystemRawStore, ext_for
     ],
 )
 def test_parse_date(raw: str | None, expected: date | None) -> None:
-    assert parse_date(raw) == expected
+    assert parse_date(raw, locale=Locale(date_order="mdy")) == expected
 
 
 @pytest.mark.parametrize(

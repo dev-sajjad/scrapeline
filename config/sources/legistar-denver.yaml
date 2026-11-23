@@ -17,6 +17,7 @@ legal:
     Agenda/minutes PDFs on legistar*.granicus.com are disallowed by robots.txt
     (checked 2026-11-17), so documents are link-only for this platform.
 schema: Meeting
+locale: { language: en-US, timezone: America/Denver, date_order: mdy, currency: USD }
 watermark: { field: source_modified_at, initial_lookback_days: 365, overlap_hours: 24 }
 adapter: scrapeline.adapters.platforms.legistar:LegistarAdapter
 pagination: offset

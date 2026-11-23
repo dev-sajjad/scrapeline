@@ -14,6 +14,7 @@ legal:
   terms_checked: 2026-11-17   # review terms/robots before activating (CLAUDE.md §6)
   notes: "Why collecting this is allowed; what is excluded."
 schema: Meeting
+locale: { language: en-US, timezone: America/Chicago, date_order: mdy, currency: USD }  # how the source writes dates, times, numbers and prices
 watermark: { field: source_modified_at, initial_lookback_days: 365, overlap_hours: 24 }
 adapter: scrapeline.adapters.platforms.legistar:LegistarAdapter
 pagination: offset            # none | next-link | page-number | cursor | load-more | offset

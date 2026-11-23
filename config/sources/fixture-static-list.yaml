@@ -10,6 +10,7 @@ legal:
   terms_checked: 2026-11-17
   notes: "Fixture site owned by this project."
 schema: Meeting
+locale: { language: en-US, timezone: UTC, date_order: mdy }
 adapter: scrapeline.adapters.declarative:DeclarativeAdapter
 pagination: next-link
 max_pages_per_run: 10

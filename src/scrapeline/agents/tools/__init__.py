@@ -15,11 +15,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from scrapeline.adapters.declarative import SiteSpec
+from scrapeline.adapters.declarative import IDENTITY_FIELD_TYPES, SiteSpec, resolve_dataset
 from scrapeline.agents.llm import ToolCall
-from scrapeline.agents.tester import SandboxMode, TesterReport, evaluate_spec, security_check_python
+from scrapeline.agents.tester import (
+    LocaleOrigin,
+    SandboxMode,
+    TesterReport,
+    evaluate_spec,
+    resolve_locale,
+    security_check_python,
+)
+from scrapeline.catalog.datasets import DatasetType
 from scrapeline.errors import ConfigError, ToolPermissionError
-from scrapeline.pipeline.models import SCHEMAS
+from scrapeline.pipeline.locale import Locale
 from scrapeline.quality.golden import load_golden
 from scrapeline.settings import Settings
 
@@ -50,6 +58,12 @@ class Workspace:
     calls: list[ToolCall] = field(default_factory=list)
     last_report: TesterReport | None = None
     tester_runs: int = 0
+    locale: Locale | None = None  # None = resolved by the tester (source config, else strict)
+    dataset: DatasetType | None = None  # None = the registry entry the spec names
+    benchmark: bool = False  # pages copied from the static-list fixture (eval cases)
+
+    def source_locale(self) -> tuple[Locale, LocaleOrigin]:
+        return resolve_locale(self.settings, self.source_id, self.locale, benchmark=self.benchmark)
 
     @property
     def spec_path(self) -> Path:
@@ -109,20 +123,26 @@ def build_tool_functions(ws: Workspace) -> dict[str, Callable[..., str]]:
         return functools.wraps(fn)(wrapper)
 
     def read_instruction() -> str:
-        """Read what this source must collect and the target schema's fields.
+        """Read what this source must collect, the target schema's fields and the locale.
 
-        Returns the source instruction and the allowed field names for the spec.
+        Returns the source instruction, the allowed field names with their types, and how
+        the source writes dates, times and numbers (locale, and where that locale came from).
         """
-        spec = SiteSpec.from_yaml(ws.spec_path.read_text())
-        model = SCHEMAS[spec.schema_]
-        fields = {n: str(f.annotation) for n, f in model.model_fields.items()}
+        spec = SiteSpec.from_yaml(ws.spec_path.read_text(), dataset=ws.dataset)
+        dataset = resolve_dataset(spec.schema_, ws.dataset)
+        fields: dict[str, str] = dict(sorted(IDENTITY_FIELD_TYPES.items()))
+        fields |= {name: f.type for name, f in dataset.fields.items()}
+        locale, origin = ws.source_locale()
         return json.dumps(
             {
                 "source_id": ws.source_id,
                 "instruction": ws.instruction,
                 "schema": spec.schema_,
                 "allowed_fields": fields,
-                "required": [n for n, f in model.model_fields.items() if f.is_required()],
+                "required": [name for name, f in dataset.fields.items() if f.required],
+                "key_fields": list(dataset.key_fields),
+                "locale": locale.model_dump(mode="json"),
+                "locale_origin": origin,
             }
         )
 
@@ -149,7 +169,7 @@ def build_tool_functions(ws: Workspace) -> dict[str, Callable[..., str]]:
         Args:
             spec_yaml: Complete YAML for the site spec (schema, record, fields, next_page, documents).
         """
-        SiteSpec.from_yaml(spec_yaml)  # raises ConfigError with the validation message
+        SiteSpec.from_yaml(spec_yaml, dataset=ws.dataset)  # raises ConfigError when invalid
         ws.spec_path.write_text(spec_yaml)
         return "ok: spec.yaml written (not yet tested; call run_tester)"
 
@@ -188,6 +208,10 @@ def build_tool_functions(ws: Workspace) -> dict[str, Callable[..., str]]:
             ws.golden_path,
             ws.settings,
             mode=ws.sandbox_mode,
+            source_id=ws.source_id,
+            locale=ws.locale,
+            dataset=ws.dataset,
+            benchmark=ws.benchmark,
         )
         ws.last_report = report
         (ws.root / f"report-{ws.tester_runs}.json").write_text(
