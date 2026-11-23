@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from collections import defaultdict
+from decimal import Decimal
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -105,6 +106,54 @@ def test_staging_columns_union_versions_and_type_every_field() -> None:
     assert columns["title"].required and columns["url"].required
     assert not columns["price_amount"].required
     assert columns["status"].values == ("closed", "open", "pending")
+
+
+def test_required_personal_data_gets_no_not_null_test() -> None:
+    # The record store blanks pii fields unless the source's usage allows personal data.
+    people = listing(
+        1,
+        {
+            "url": {"type": "url", "key": True},
+            "name": {"type": "text", "required": True, "pii": True},
+            "fee": {"type": "money", "required": True, "pii": True},
+        },
+    )
+    columns = gen.staging_columns([people])
+    entries = {c.name: gen._column_entry(c) for c in columns}
+    assert "data_tests" not in entries["name"]
+    assert "data_tests" not in entries["fee_amount"]
+    assert "data_tests" not in entries["fee_currency"]
+    assert entries["url"]["data_tests"] == [{"not_null": {"config": {"where": gen.NOT_REMOVED}}}]
+    assert "pii" in entries["name"]["description"]
+
+
+def test_a_type_change_does_not_fail_on_old_payloads() -> None:
+    v1 = listing(1, {"url": {"type": "url", "key": True}, "stock": "text", "price": "text"})
+    v2 = listing(2, {"url": {"type": "url", "key": True}, "stock": "int", "price": "money"})
+    columns = {c.name: c for c in gen.staging_columns([v1, v2])}
+    assert columns["stock"].expression == (
+        "case when dataset_version in (1) then try_cast(payload->>'stock' as BIGINT) "
+        "else cast(payload->>'stock' as BIGINT) end"
+    )
+    assert "versions 1 had another type" in columns["stock"].description
+    assert columns["url"].expression == "payload->>'url'"
+
+    select = ", ".join(f"{c.expression} as {c.name}" for c in columns.values())
+    con = duckdb.connect()
+    result = con.execute(
+        f"select {select} from (values "
+        """(1, '{"url": "u1", "stock": "5 left", "price": "about 3"}'::json), """
+        """(2, '{"url": "u2", "stock": "7", """
+        """"price": {"amount": "2.50", "currency": "GBP"}}'::json)"""
+        ") as v(dataset_version, payload) order by dataset_version"
+    ).fetchall()
+    assert [(r[1], r[2]) for r in result] == [(None, None), (7, Decimal("2.5"))]
+    # The newest type still fails loudly on a value it cannot hold.
+    with pytest.raises(duckdb.ConversionException):
+        con.execute(
+            f"select {columns['stock'].expression} "
+            """from (values (2, '{"stock": "lots"}'::json)) as v(dataset_version, payload)"""
+        ).fetchall()
 
 
 def test_staging_columns_refuse_clashing_names() -> None:

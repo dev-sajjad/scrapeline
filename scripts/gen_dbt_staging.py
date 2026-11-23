@@ -9,7 +9,10 @@ with one typed column per field, so a new dataset type gets a model by re-runnin
 
 Typed datasets (the civic pack) are skipped: they keep their own tables and have no version
 history in the lake. When a dataset has several versions, the model has the union of their
-fields and each field takes its type from the newest version that defines it.
+fields and each field takes its type from the newest version that defines it; payloads of
+versions that gave the field another type are cast with `try_cast`, so an old value that does
+not convert is empty instead of failing the build. Personal-data fields (`pii`) get no
+`not_null` test: the record store blanks them unless the source's usage allows personal data.
 """
 
 from __future__ import annotations
@@ -80,6 +83,7 @@ class StagingColumn:
     description: str
     required: bool = False
     values: tuple[str, ...] | None = None
+    pii: bool = False
 
 
 def lake_sources_yaml(tables: Mapping[str, LakeTable]) -> str:
@@ -140,10 +144,13 @@ def staging_columns(versions: Sequence[DatasetType]) -> list[StagingColumn]:
         if all(name in ds.fields and ds.fields[name].required for ds in versions)
     }
     values: dict[str, set[str]] = {}
+    pii: set[str] = set()
     for ds in versions:
         for name, f in ds.fields.items():
             if f.values:
                 values.setdefault(name, set()).update(f.values)
+            if f.pii:
+                pii.add(name)
 
     columns: list[StagingColumn] = []
     for name, f in fields.items():
@@ -151,16 +158,23 @@ def staging_columns(versions: Sequence[DatasetType]) -> list[StagingColumn]:
         about = f.description or name.replace("_", " ").capitalize()
         if column != name:
             about += f" (field `{name}`)"
-        flags = ", ".join(x for x in (f.type, "key" if f.key else "", "pii" if f.pii else "") if x)
+        flags = ", ".join(
+            x for x in (f.type, "key" if f.key else "", "pii" if name in pii else "") if x
+        )
+        # Versions that gave the field another type; their payloads may not convert.
+        other = sorted(ds.version for ds in versions if _type_of(ds, name) not in (None, f.type))
+        if other:
+            about += f" (versions {', '.join(map(str, other))} had another type)"
         if f.type == "money":
             money = f"payload->'{name}'"
             columns += [
                 StagingColumn(
                     f"{column}_amount",
-                    f"cast({money}->>'amount' as {MONEY_AMOUNT})",
+                    _cast(f"{money}->>'amount'", MONEY_AMOUNT, other),
                     MONEY_AMOUNT,
                     f"{about}: amount ({flags}).",
                     name in required,
+                    pii=name in pii,
                 ),
                 StagingColumn(
                     f"{column}_currency",
@@ -168,13 +182,14 @@ def staging_columns(versions: Sequence[DatasetType]) -> list[StagingColumn]:
                     "VARCHAR",
                     f"{about}: ISO 4217 currency ({flags}).",
                     name in required,
+                    pii=name in pii,
                 ),
             ]
             continue
         sql_type = SQL_TYPES[f.type]
         expression = f"payload->>'{name}'"
         if sql_type != "VARCHAR":
-            expression = f"cast({expression} as {sql_type})"
+            expression = _cast(expression, sql_type, other)
         columns.append(
             StagingColumn(
                 column,
@@ -183,6 +198,7 @@ def staging_columns(versions: Sequence[DatasetType]) -> list[StagingColumn]:
                 f"{about} ({flags}).",
                 name in required,
                 tuple(sorted(values[name])) if name in values else None,
+                pii=name in pii,
             )
         )
     names = [c.name for c in columns]
@@ -190,6 +206,22 @@ def staging_columns(versions: Sequence[DatasetType]) -> list[StagingColumn]:
     if clashes:
         raise SystemExit(f"{versions[0].name}: staging column names clash: {clashes}")
     return columns
+
+
+def _type_of(ds: DatasetType, name: str) -> str | None:
+    f = ds.fields.get(name)
+    return f.type if f is not None else None
+
+
+def _cast(expression: str, sql_type: str, loose_versions: Sequence[int]) -> str:
+    """A cast that fails loudly for the column's own type, and `try_cast` for older types."""
+    if not loose_versions:
+        return f"cast({expression} as {sql_type})"
+    listed = ", ".join(map(str, loose_versions))
+    return (
+        f"case when dataset_version in ({listed}) then try_cast({expression} as {sql_type}) "
+        f"else cast({expression} as {sql_type}) end"
+    )
 
 
 def dataset_model_sql(name: str, columns: Sequence[StagingColumn]) -> str:
@@ -227,7 +259,8 @@ def dataset_models_yaml(models: Mapping[str, tuple[DatasetType, list[StagingColu
 
 def _column_entry(column: StagingColumn) -> dict[str, Any]:
     tests: list[Any] = []
-    if column.required:
+    # Personal data is blanked unless the source may keep it, so it can be empty by design.
+    if column.required and not column.pii:
         tests.append({"not_null": {"config": {"where": NOT_REMOVED}}})
     if column.values:
         tests.append({"accepted_values": {"arguments": {"values": list(column.values)}}})
