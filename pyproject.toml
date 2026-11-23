@@ -24,6 +24,7 @@ dependencies = [
     "python-dateutil>=2.9",
     "pymupdf>=1.25",
     "protego>=0.4",
+    "duckdb>=1.1",
 ]
 
 [dependency-groups]
@@ -41,8 +42,16 @@ dev = [
 
 [project.optional-dependencies]
 # Optional extras, installed explicitly (`uv sync --extra serve`), never by default.
-serve = ["fastapi>=0.115", "uvicorn[standard]>=0.34"]
+serve = [
+    "fastapi>=0.115",
+    "jinja2>=3.1",
+    "uvicorn[standard]>=0.34",
+]
 s3 = ["boto3>=1.36"]
+analytics = [
+    "dbt-core>=1.9",
+    "dbt-duckdb>=1.9",
+]
 
 [project.scripts]
 scrapeline = "scrapeline.cli:app"
