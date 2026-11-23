@@ -40,6 +40,7 @@ _TIME_12H = re.compile(
     r"(?<![\d:])(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?\s*([ap])\.?\s?m\b\.?", re.IGNORECASE
 )
 _TIME_24H = re.compile(r"(?<![\d:])(\d{1,2}):(\d{2})(?::(\d{2})(?:[.,](\d{1,6}))?)?(?!\d)")
+_TIME_SUFFIX = re.compile(r"^\s*(?:uhr|hrs?|hours|o'clock)\b\.?", re.IGNORECASE)  # '18:00 Uhr'
 _ZONE = re.compile(
     r"\s*(?:"
     r"(?P<offset>(?:UTC|GMT)\s*[+\-\u2212]\d{1,2}(?::?\d{2})?|[+\-\u2212]\d{2}:?\d{2})"
@@ -289,7 +290,7 @@ def _split_time(text: str) -> tuple[str, re.Match[str] | None, re.Match[str] | N
     found = _TIME_12H.search(text) or _TIME_24H.search(text)
     if found is None:
         return text, None, None
-    tail = text[found.end() :]
+    tail = _TIME_SUFFIX.sub("", text[found.end() :], count=1)
     zone = _ZONE.match(tail)
     if zone is not None:
         tail = tail[zone.end() :]

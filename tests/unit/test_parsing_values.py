@@ -95,6 +95,8 @@ def test_date_ignores_a_trailing_time_and_takes_date_objects() -> None:
         ("2026-11-25 18:00:00-0500", datetime(2026, 11, 25, 23, tzinfo=UTC)),
         ("25/11/2026 18:00 UTC+1", datetime(2026, 11, 25, 17, tzinfo=UTC)),
         ("Nov 25, 2026 6:00 PM GMT", datetime(2026, 11, 25, 18, tzinfo=UTC)),
+        ("Wed, 25 Nov 2026 18:00:00 +0000", datetime(2026, 11, 25, 18, tzinfo=UTC)),  # RFC 2822
+        ("Wed, 25 Nov 2026 18:00:00 GMT", datetime(2026, 11, 25, 18, tzinfo=UTC)),
     ],
 )
 def test_datetime_respects_explicit_offsets_without_a_timezone(
@@ -123,6 +125,7 @@ def test_datetime_respects_explicit_offsets_without_a_timezone(
         (US, "11/01/2026 1:30 AM PDT", datetime(2026, 11, 1, 8, 30, tzinfo=UTC)),
         (US, "11/01/2026 1:30 AM PST", datetime(2026, 11, 1, 9, 30, tzinfo=UTC)),
         (US, "Tuesday, November 25, 2026 at 6:00 PM", datetime(2026, 11, 26, 2, tzinfo=UTC)),
+        (DE, "24.11.2026, 18:30 Uhr", datetime(2026, 11, 24, 17, 30, tzinfo=UTC)),
     ],
 )
 def test_naive_datetimes_use_the_source_timezone_across_dst(
