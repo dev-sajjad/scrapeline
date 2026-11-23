@@ -1,0 +1,246 @@
+{
+ "site": "shop-sim/day-1",
+ "schema": "product",
+ "records": [
+  {
+   "external_id": "{FIXTURE_BASE_URL}/shop-sim/products/stoneware-mug.html",
+   "url": "{FIXTURE_BASE_URL}/shop-sim/products/stoneware-mug.html",
+   "title": "Stoneware mug, 350 ml",
+   "sku": "SIM-0001",
+   "category": "Kitchen",
+   "price": {
+    "amount": "8.50",
+    "currency": "GBP"
+   },
+   "in_stock": true
+  },
+  {
+   "external_id": "{FIXTURE_BASE_URL}/shop-sim/products/espresso-cups.html",
+   "url": "{FIXTURE_BASE_URL}/shop-sim/products/espresso-cups.html",
+   "title": "Espresso cup set (4)",
+   "sku": "SIM-0002",
+   "category": "Kitchen",
+   "price": {
+    "amount": "14.99",
+    "currency": "GBP"
+   },
+   "in_stock": true
+  },
+  {
+   "external_id": "{FIXTURE_BASE_URL}/shop-sim/products/cast-iron-skillet.html",
+   "url": "{FIXTURE_BASE_URL}/shop-sim/products/cast-iron-skillet.html",
+   "title": "Cast iron skillet, 26 cm",
+   "sku": "SIM-0003",
+   "category": "Kitchen",
+   "price": {
+    "amount": "34.00",
+    "currency": "GBP"
+   },
+   "in_stock": true
+  },
+  {
+   "external_id": "{FIXTURE_BASE_URL}/shop-sim/products/chef-knife.html",
+   "url": "{FIXTURE_BASE_URL}/shop-sim/products/chef-knife.html",
+   "title": "Chef's knife, 20 cm",
+   "sku": "SIM-0004",
+   "category": "Kitchen",
+   "price": {
+    "amount": "49.95",
+    "currency": "GBP"
+   },
+   "in_stock": true
+  },
+  {
+   "external_id": "{FIXTURE_BASE_URL}/shop-sim/products/linen-tea-towels.html",
+   "url": "{FIXTURE_BASE_URL}/shop-sim/products/linen-tea-towels.html",
+   "title": "Linen tea towels (2)",
+   "sku": "SIM-0005",
+   "category": "Kitchen",
+   "price": {
+    "amount": "12.00",
+    "currency": "GBP"
+   },
+   "in_stock": true
+  },
+  {
+   "external_id": "{FIXTURE_BASE_URL}/shop-sim/products/bamboo-board.html",
+   "url": "{FIXTURE_BASE_URL}/shop-sim/products/bamboo-board.html",
+   "title": "Bamboo chopping board",
+   "sku": "SIM-0006",
+   "category": "Kitchen",
+   "price": {
+    "amount": "18.75",
+    "currency": "GBP"
+   },
+   "in_stock": true
+  },
+  {
+   "external_id": "{FIXTURE_BASE_URL}/shop-sim/products/desk-lamp.html",
+   "url": "{FIXTURE_BASE_URL}/shop-sim/products/desk-lamp.html",
+   "title": "Adjustable desk lamp",
+   "sku": "SIM-0007",
+   "category": "Home office",
+   "price": {
+    "amount": "39.99",
+    "currency": "GBP"
+   },
+   "in_stock": true
+  },
+  {
+   "external_id": "{FIXTURE_BASE_URL}/shop-sim/products/ergonomic-chair.html",
+   "url": "{FIXTURE_BASE_URL}/shop-sim/products/ergonomic-chair.html",
+   "title": "Ergonomic office chair",
+   "sku": "SIM-0008",
+   "category": "Home office",
+   "price": {
+    "amount": "1249.00",
+    "currency": "GBP"
+   },
+   "in_stock": true
+  },
+  {
+   "external_id": "{FIXTURE_BASE_URL}/shop-sim/products/monitor-arm.html",
+   "url": "{FIXTURE_BASE_URL}/shop-sim/products/monitor-arm.html",
+   "title": "Single monitor arm",
+   "sku": "SIM-0009",
+   "category": "Home office",
+   "price": {
+    "amount": "64.50",
+    "currency": "GBP"
+   },
+   "in_stock": true
+  },
+  {
+   "external_id": "{FIXTURE_BASE_URL}/shop-sim/products/notebook-a5.html",
+   "url": "{FIXTURE_BASE_URL}/shop-sim/products/notebook-a5.html",
+   "title": "A5 dotted notebook",
+   "sku": "SIM-0010",
+   "category": "Stationery",
+   "price": {
+    "amount": "6.25",
+    "currency": "GBP"
+   },
+   "in_stock": true
+  },
+  {
+   "external_id": "{FIXTURE_BASE_URL}/shop-sim/products/fountain-pen.html",
+   "url": "{FIXTURE_BASE_URL}/shop-sim/products/fountain-pen.html",
+   "title": "Fountain pen, medium nib",
+   "sku": "SIM-0011",
+   "category": "Stationery",
+   "price": {
+    "amount": "27.00",
+    "currency": "GBP"
+   },
+   "in_stock": true
+  },
+  {
+   "external_id": "{FIXTURE_BASE_URL}/shop-sim/products/pencil-set.html",
+   "url": "{FIXTURE_BASE_URL}/shop-sim/products/pencil-set.html",
+   "title": "Graphite pencil set (12)",
+   "sku": "SIM-0012",
+   "category": "Stationery",
+   "price": {
+    "amount": "9.99",
+    "currency": "GBP"
+   },
+   "in_stock": true
+  },
+  {
+   "external_id": "{FIXTURE_BASE_URL}/shop-sim/products/washi-tape.html",
+   "url": "{FIXTURE_BASE_URL}/shop-sim/products/washi-tape.html",
+   "title": "Washi tape (5 rolls)",
+   "sku": "SIM-0013",
+   "category": "Stationery",
+   "price": {
+    "amount": "7.49",
+    "currency": "GBP"
+   },
+   "in_stock": true
+  },
+  {
+   "external_id": "{FIXTURE_BASE_URL}/shop-sim/products/wool-throw.html",
+   "url": "{FIXTURE_BASE_URL}/shop-sim/products/wool-throw.html",
+   "title": "Wool throw blanket",
+   "sku": "SIM-0014",
+   "category": "Home",
+   "price": {
+    "amount": "79.00",
+    "currency": "GBP"
+   },
+   "in_stock": true
+  },
+  {
+   "external_id": "{FIXTURE_BASE_URL}/shop-sim/products/scented-candle.html",
+   "url": "{FIXTURE_BASE_URL}/shop-sim/products/scented-candle.html",
+   "title": "Fig scented candle",
+   "sku": "SIM-0015",
+   "category": "Home",
+   "price": {
+    "amount": "22.00",
+    "currency": "GBP"
+   },
+   "in_stock": false
+  },
+  {
+   "external_id": "{FIXTURE_BASE_URL}/shop-sim/products/plant-pot.html",
+   "url": "{FIXTURE_BASE_URL}/shop-sim/products/plant-pot.html",
+   "title": "Terracotta plant pot, 15 cm",
+   "sku": "SIM-0016",
+   "category": "Garden",
+   "price": {
+    "amount": "11.50",
+    "currency": "GBP"
+   },
+   "in_stock": true
+  },
+  {
+   "external_id": "{FIXTURE_BASE_URL}/shop-sim/products/watering-can.html",
+   "url": "{FIXTURE_BASE_URL}/shop-sim/products/watering-can.html",
+   "title": "Galvanised watering can",
+   "sku": "SIM-0017",
+   "category": "Garden",
+   "price": {
+    "amount": "29.95",
+    "currency": "GBP"
+   },
+   "in_stock": true
+  },
+  {
+   "external_id": "{FIXTURE_BASE_URL}/shop-sim/products/secateurs.html",
+   "url": "{FIXTURE_BASE_URL}/shop-sim/products/secateurs.html",
+   "title": "Bypass secateurs",
+   "sku": "SIM-0018",
+   "category": "Garden",
+   "price": {
+    "amount": "19.99",
+    "currency": "GBP"
+   },
+   "in_stock": true
+  },
+  {
+   "external_id": "{FIXTURE_BASE_URL}/shop-sim/products/seed-tray.html",
+   "url": "{FIXTURE_BASE_URL}/shop-sim/products/seed-tray.html",
+   "title": "Seed tray set (3)",
+   "sku": "SIM-0019",
+   "category": "Garden",
+   "price": {
+    "amount": "8.99",
+    "currency": "GBP"
+   },
+   "in_stock": false
+  },
+  {
+   "external_id": "{FIXTURE_BASE_URL}/shop-sim/products/garden-kneeler.html",
+   "url": "{FIXTURE_BASE_URL}/shop-sim/products/garden-kneeler.html",
+   "title": "Foam garden kneeler",
+   "sku": "SIM-0020",
+   "category": "Garden",
+   "price": {
+    "amount": "12.49",
+    "currency": "GBP"
+   },
+   "in_stock": true
+  }
+ ]
+}
