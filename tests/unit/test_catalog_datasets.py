@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -106,10 +107,68 @@ def test_dataset_contract_validation() -> None:
 
 def test_redefining_a_version_differently_is_refused() -> None:
     a = DatasetType(name="thing", description="v1", fields={"id_": FieldDef(key=True)})
-    b = DatasetType(name="thing", description="changed", fields={"id_": FieldDef(key=True)})
+    b = DatasetType(name="thing", description="v1", fields={"id_": FieldDef(type="int", key=True)})
     with pytest.raises(DatasetError, match="defined twice"):
         DatasetRegistry([a, b])
     assert DatasetRegistry([a, a]).get("thing") == a
+
+
+def test_descriptions_are_not_part_of_the_contract() -> None:
+    a = DatasetType(name="thing", description="v1", fields={"id_": FieldDef(key=True)})
+    b = DatasetType(
+        name="thing", description="typo fixed", fields={"id_": FieldDef(key=True, description="x")}
+    )
+    assert a.definition_hash == b.definition_hash
+
+
+def test_key_values_are_coerced_before_identity() -> None:
+    ds = DatasetType(
+        name="t",
+        description="x",
+        fields={"n": FieldDef(type="int", key=True), "d": FieldDef(type="date", key=True)},
+    )
+    assert ds.external_id({"n": "01", "d": "2026-01-02"}) == ds.external_id(
+        {"n": 1, "d": date(2026, 1, 2)}
+    )
+    with pytest.raises(ValueError, match="not a valid int"):
+        ds.external_id({"n": "one", "d": "2026-01-02"})
+
+
+@pytest.mark.parametrize(
+    ("fields", "message"),
+    [
+        ({"price": FieldDef(type="money", key=True)}, "must be one of"),
+        ({"json": FieldDef(key=True)}, "reserved"),
+        ({"hash_exclude": FieldDef(key=True)}, "reserved"),
+    ],
+)
+def test_unsafe_key_types_and_shadowing_names_are_refused(
+    fields: dict[str, FieldDef], message: str
+) -> None:
+    with pytest.raises(ValidationError, match=message):
+        DatasetType(name="bad", description="x", fields=fields)
+
+
+def test_datetimes_are_stored_in_utc() -> None:
+    article = resolve_model("article").model_validate(
+        {"url": "https://example.org/a", "title": "T", "published_at": "2026-03-29T09:00:00+02:00"}
+    )
+    assert article.published_at == datetime(2026, 3, 29, 7, tzinfo=UTC)  # type: ignore[attr-defined]
+    assert article.published_at.utcoffset() == timedelta(0)  # type: ignore[attr-defined]
+
+
+def test_new_optional_fields_and_version_bumps_do_not_change_the_hash() -> None:
+    v1 = DatasetType(name="thing", description="x", fields={"url": FieldDef(type="url", key=True)})
+    v2 = DatasetType(
+        name="thing",
+        version=2,
+        description="x",
+        fields={"url": FieldDef(type="url", key=True), "colour": FieldDef()},
+    )
+    row = {"url": "https://example.org/1"}
+    assert content_hash(v1.record_model().model_validate(row)) == content_hash(
+        v2.record_model().model_validate(row)
+    )
 
 
 def test_latest_version_wins_unless_pinned() -> None:

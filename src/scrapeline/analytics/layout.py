@@ -3,21 +3,30 @@
 Parquet files live under `settings.lake_dir` (default `data/lake/`). Append tables are
 immutable files partitioned Hive-style (read with `hive_partitioning = true`); each export
 writes new files and never rewrites old ones. Snapshot tables are rewritten whole on every
-export. Personal-data fields (`FieldDef.pii`) are removed from payloads unless the source's
-usage allows them. Export progress per append table is kept in `STATE_PATH`.
+export. `date` partitions are the UTC date of the table's time column: `valid_from` for
+record_versions, `finished_at` for runs (finished runs only), `created_at` or `fetched_at`
+for the others.
 
-Validity intervals (valid_to, is_current) are derived in dbt from `record_versions`, so the
-lake stays append-only.
+Incremental export: each append table keeps a watermark on its time column in `STATE_PATH`.
+An export reads rows with time > watermark - OVERLAP and time <= the export's cutoff, so rows
+committed late are not skipped. Duplicates across exports are therefore expected: staging
+models dedupe on the primary key (version_id, run_id, id).
+
+`dataset_version` comes from record_versions.schema_version. Validity intervals (valid_to,
+is_current) are derived in dbt by ordering each record's versions by `version`, so the lake
+stays append-only. Personal-data fields are removed from payloads unless the source's usage
+allows them.
 """
 
 from __future__ import annotations
 
 from collections.abc import Collection
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal, Protocol
 
 STATE_PATH = "_state/exports.json"
+OVERLAP = timedelta(hours=1)
 LAKE_LAYOUT_VERSION = 1
 
 

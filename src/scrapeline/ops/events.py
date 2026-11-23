@@ -33,7 +33,7 @@ class Event(BaseModel):
     kind: str = Field(pattern=r"^[a-z_]+(\.[a-z_]+)+$", max_length=50)
     message: str = ""
     level: EventLevel = "info"
-    source_id: str | None = None
+    source_id: str | None = Field(default=None, max_length=100)
     run_id: uuid.UUID | None = None
     job_id: int | None = None
     data: dict[str, Any] = Field(default_factory=dict)
@@ -63,8 +63,21 @@ class PostgresEventBus:
             log.warning("event.publish_failed", kind=event.kind, error=repr(exc))
 
 
-def publish_in(conn: Connection, event: Event) -> int:
-    """Insert and notify inside the caller's transaction. Returns the event id."""
+def publish_in(conn: Connection, event: Event) -> int | None:
+    """Insert and notify inside the caller's transaction. Returns the event id, or None.
+
+    Runs in a savepoint: a failed insert is logged and rolled back alone, so the caller's
+    transaction stays usable.
+    """
+    try:
+        with conn.begin_nested():
+            return _insert_and_notify(conn, event)
+    except Exception as exc:  # events are observability, never a reason to fail a run
+        log.warning("event.publish_failed", kind=event.kind, error=repr(exc))
+        return None
+
+
+def _insert_and_notify(conn: Connection, event: Event) -> int:
     event_id: int = conn.execute(
         t.event.insert()
         .values(

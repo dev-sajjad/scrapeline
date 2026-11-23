@@ -87,9 +87,13 @@ class SiteClassifier(Protocol):
 
 
 def site_host(url_or_host: str) -> str:
-    """Canonical site key: lowercase host without a leading `www.` or trailing dot."""
-    host = urlsplit(url_or_host).hostname if "//" in url_or_host else url_or_host
-    host = (host or "").strip().lower().rstrip(".")
+    """Canonical site key: lowercase ASCII (punycode) host, no port, `www.` or trailing dot."""
+    text = url_or_host.strip()
+    host = urlsplit(text if "//" in text else f"//{text}").hostname or ""
+    host = host.rstrip(".").removeprefix("www.")
     if not host:
         raise ValueError(f"no host in {url_or_host!r}")
-    return host.removeprefix("www.")
+    try:
+        return host.encode("idna").decode("ascii")
+    except UnicodeError as exc:
+        raise ValueError(f"invalid host {host!r}") from exc

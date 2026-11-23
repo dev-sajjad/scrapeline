@@ -9,13 +9,15 @@ or by the generator agent. Minimal form:
     collect: "Every book: title, price, stock status, star rating, product page link"
     usage: {purpose: "Price tracking demo"}
 
-`dataset` picks an existing dataset type; `fields` narrows or defines it (shorthand
-`price: money` or a full field definition). With neither, a dataset type is proposed from
-`collect` and needs human approval before the source can run.
+`dataset` picks a dataset type. For an existing type, `fields` selects a subset to collect
+(types must match; new fields need a new dataset type or version). For a new type name, or
+with no `dataset`, `fields` defines the new type and needs at least one key field. With
+neither, a dataset type is proposed from `collect` and needs human approval.
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -23,8 +25,14 @@ from urllib.parse import urlsplit
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from scrapeline.catalog.datasets import NAME_PATTERN, RESERVED_FIELDS, FieldDef
-from scrapeline.errors import ConfigError
+from scrapeline.catalog.datasets import (
+    NAME_PATTERN,
+    RESERVED_FIELDS,
+    DatasetType,
+    FieldDef,
+    default_registry,
+)
+from scrapeline.errors import ConfigError, DatasetError
 from scrapeline.pipeline.locale import Locale
 from scrapeline.registry.config import UsageRights
 
@@ -76,8 +84,27 @@ class ScrapeInstruction(_Strict):
         return fields
 
     @model_validator(mode="after")
+    def _fields_fit_the_dataset(self) -> ScrapeInstruction:
+        existing = self.existing_dataset
+        if existing is not None:
+            for name, f in (self.fields or {}).items():
+                known = existing.fields.get(name)
+                if known is None or known.type != f.type:
+                    raise ValueError(
+                        f"field {name!r} is not a {f.type} field of dataset {existing.name!r}"
+                    )
+        elif self.fields is not None and not any(f.key for f in self.fields.values()):
+            raise ValueError("a new dataset type needs at least one field with key: true")
+        elif self.dataset is not None and self.fields is None:
+            raise ValueError(f"unknown dataset {self.dataset!r}; define its fields")
+        return self
+
+    @model_validator(mode="after")
     def _personal_data_needs_permission(self) -> ScrapeInstruction:
-        pii = [name for name, f in (self.fields or {}).items() if f.pii]
+        existing = self.existing_dataset
+        source = existing.fields if existing is not None else (self.fields or {})
+        wanted = self.fields.keys() if self.fields else source.keys()
+        pii = [name for name in wanted if source[name].pii]
         if pii and not self.usage.allow_pii:
             raise ValueError(f"fields {pii} are personal data; set usage.allow_pii with a purpose")
         if self.usage.allow_pii and not self.usage.purpose:
@@ -85,11 +112,23 @@ class ScrapeInstruction(_Strict):
         return self
 
     @property
+    def existing_dataset(self) -> DatasetType | None:
+        if self.dataset is None:
+            return None
+        try:
+            return default_registry().get(self.dataset)
+        except DatasetError:
+            return None
+
+    @property
     def source_id(self) -> str:
+        """`id`, else a slug of `name`; names without Latin letters get a stable hash id."""
         if self.id:
             return self.id
-        slug = re.sub(r"[^a-z0-9]+", "-", self.name.lower()).strip("-")
-        return slug[:100] or "source"
+        slug = re.sub(r"[^a-z0-9]+", "-", self.name.lower()).strip("-")[:100].strip("-")
+        if len(slug) >= 2:
+            return slug
+        return "src-" + hashlib.sha256(self.name.encode()).hexdigest()[:8]
 
     @property
     def hosts(self) -> list[str]:

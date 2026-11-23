@@ -27,8 +27,11 @@ def _default(value: Any) -> str:
 
 def content_hash(record: Record) -> str:
     payload = record.model_dump(exclude=set(record.hash_exclude))
+    if record.hash_skip_none:
+        payload = {k: v for k, v in payload.items() if v is not None}
     payload["__type"] = record.record_type
-    payload["__schema_version"] = record.schema_version
+    if record.hash_includes_version:
+        payload["__schema_version"] = record.schema_version
     blob = json.dumps(payload, sort_keys=True, default=_default, separators=(",", ":"))
     return hashlib.sha256(blob.encode()).hexdigest()
 

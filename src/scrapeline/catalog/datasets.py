@@ -6,7 +6,9 @@ hand-written models with their own tables. Changing a definition requires a vers
 `catalog.repository.sync_dataset_types` refuses a silent redefinition.
 
 Identity: a parser may supply `external_id`; otherwise it is derived from the key fields
-(one key: its value; several keys: a hash of their values).
+(one key: its canonical value; several keys: a hash of them). Key values are coerced to the
+field type first, so "01" and 1 give the same identity. Key fields must not change between
+versions of a dataset type, or every record would get a new identity.
 """
 
 from __future__ import annotations
@@ -17,14 +19,23 @@ import re
 import types
 import typing
 from collections.abc import Iterable, Iterator
-from datetime import date, datetime, time
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from functools import cache
 from pathlib import Path
 from typing import Any, ClassVar, Literal, Union, get_args, get_origin
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    create_model,
+    field_validator,
+    model_validator,
+)
 
 from scrapeline.errors import DatasetError
 from scrapeline.pipeline.models import SCHEMAS, Record
@@ -35,6 +46,7 @@ FieldType = Literal[
     "text", "int", "float", "decimal", "money", "bool", "url", "date", "datetime", "time", "enum"
 ]
 Storage = Literal["generic", "typed"]
+KEY_TYPES = frozenset({"text", "url", "int", "date", "enum"})
 
 PACKS_DIR = Path(__file__).resolve().parent / "packs"
 NAME_PATTERN = r"^[a-z][a-z0-9_]{0,62}$"
@@ -112,9 +124,11 @@ class DatasetType(BaseModel):
     def _valid_contract(self) -> DatasetType:
         if self.storage == "typed":
             return self
-        for name in self.fields:
-            if not _is_name(name) or name in RESERVED_FIELDS:
+        for name, f in self.fields.items():
+            if not _is_name(name) or name in RESERVED_FIELDS or name in _model_attributes():
                 raise ValueError(f"invalid or reserved field name {name!r}")
+            if f.key and f.type not in KEY_TYPES:
+                raise ValueError(f"key field {name!r} must be one of {sorted(KEY_TYPES)}")
         if not self.key_fields:
             raise ValueError(f"dataset {self.name!r} needs at least one key field")
         if self.canonical_url_field is not None:
@@ -133,17 +147,28 @@ class DatasetType(BaseModel):
 
     @property
     def definition_hash(self) -> str:
-        blob = json.dumps(self.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+        """Hash of the semantic definition; descriptions and pack do not count."""
+        semantic = self.model_dump(
+            mode="json",
+            exclude={"description": True, "pack": True, "fields": {"__all__": {"description"}}},
+        )
+        blob = json.dumps(semantic, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(blob.encode()).hexdigest()
 
     def external_id(self, data: dict[str, Any]) -> str | None:
-        """Identity from key fields; None when a key value is missing."""
-        values = [data.get(name) for name in self.key_fields]
-        if any(v is None or (isinstance(v, str) and not v.strip()) for v in values):
-            return None
+        """Identity from key fields; None when a key value is missing.
+
+        Raises ValueError when a key value cannot be read as its field type.
+        """
+        values: list[str] = []
+        for name in self.key_fields:
+            raw = data.get(name)
+            if raw is None or (isinstance(raw, str) and not raw.strip()):
+                return None
+            values.append(_canonical_key(name, self.fields[name], raw))
         if len(values) == 1:
-            return str(values[0]).strip()
-        blob = json.dumps([str(v).strip() for v in values], separators=(",", ":"))
+            return values[0]
+        blob = json.dumps(values, separators=(",", ":"))
         return "k:" + hashlib.sha256(blob.encode()).hexdigest()[:32]
 
     def record_model(self) -> type[Record]:
@@ -156,9 +181,15 @@ class DatasetType(BaseModel):
 
 
 class GenericRecord(Record):
-    """Base of every runtime-built record model; `dataset` is set on each subclass."""
+    """Base of every runtime-built record model; `dataset` is set on each subclass.
+
+    The content hash skips empty fields and the schema version, so adding an optional field
+    or bumping the version does not turn every record into a change.
+    """
 
     dataset: ClassVar[DatasetType]
+    hash_skip_none: ClassVar[bool] = True
+    hash_includes_version: ClassVar[bool] = False
 
     @model_validator(mode="before")
     @classmethod
@@ -192,6 +223,30 @@ class GenericRecord(Record):
         return self
 
 
+def _to_utc(cls: type[GenericRecord], value: datetime | None) -> datetime | None:
+    if value is None or value.tzinfo is None:
+        return value
+    return value.astimezone(UTC)
+
+
+def _canonical_key(name: str, f: FieldDef, raw: Any) -> str:
+    py: Any = Literal[f.values] if f.type == "enum" else _PYTHON_TYPES[f.type]
+    value = raw.strip() if isinstance(raw, str) else raw
+    try:
+        coerced = TypeAdapter(py).validate_python(value)
+    except ValidationError as exc:
+        raise ValueError(f"key field {name!r} is not a valid {f.type}: {raw!r}") from exc
+    if isinstance(coerced, date):
+        return coerced.isoformat()
+    return clean_text(str(coerced)) or ""
+
+
+@cache
+def _model_attributes() -> frozenset[str]:
+    """Names a field may not use because the record model already has them."""
+    return frozenset(name for name in dir(GenericRecord) if not name.startswith("__"))
+
+
 _MODELS: dict[tuple[str, int, str], type[Record]] = {}
 
 
@@ -201,7 +256,11 @@ def _build_model(dataset: DatasetType) -> type[Record]:
         py: Any = Literal[f.values] if f.type == "enum" else _PYTHON_TYPES[f.type]
         fields[name] = (py, ...) if f.required else (py | None, None)
     model_name = "".join(part.title() for part in dataset.name.split("_")) + f"V{dataset.version}"
-    model: Any = create_model(model_name, __base__=GenericRecord, **fields)
+    datetimes = [name for name, f in dataset.fields.items() if f.type == "datetime"]
+    validators = {"_datetimes_to_utc": field_validator(*datetimes)(_to_utc)} if datetimes else {}
+    model: Any = create_model(
+        model_name, __base__=GenericRecord, __validators__=validators, **fields
+    )
     model.record_type = dataset.name
     model.schema_version = dataset.version
     model.dataset = dataset
@@ -295,9 +354,25 @@ class DatasetRegistry:
     def __iter__(self) -> Iterator[DatasetType]:
         return iter(sorted(self._by_key.values(), key=lambda ds: (ds.name, ds.version)))
 
+    def canonical_name(self, name: str) -> str:
+        """'Meeting', 'meeting' -> 'meeting'; raises DatasetError for unknown names."""
+        return self.get(name).name
+
 
 @cache
-def default_registry(extra_dirs: tuple[Path, ...] = ()) -> DatasetRegistry:
+def default_registry(extra_dirs: tuple[Path, ...] | None = None) -> DatasetRegistry:
+    """Built-in packs, typed models and user types (settings.datasets_dir by default).
+
+    Inside the offline sandbox settings are unavailable; only built-ins load there and the
+    tester ships user dataset definitions explicitly.
+    """
+    if extra_dirs is None:
+        try:
+            from scrapeline.settings import get_settings
+        except ImportError:
+            extra_dirs = ()
+        else:
+            extra_dirs = (get_settings().datasets_dir,)
     return DatasetRegistry.load(extra_dirs)
 
 

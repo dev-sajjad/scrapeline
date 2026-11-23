@@ -5,12 +5,14 @@ import select as io_select
 
 import psycopg
 import pytest
-from sqlalchemy import Engine, select
+from sqlalchemy import Connection, Engine, select, text
+from sqlalchemy.exc import IntegrityError
 
 from scrapeline.catalog.datasets import DatasetRegistry, DatasetType, FieldDef, default_registry
 from scrapeline.catalog.repository import ensure_site, sync_dataset_types
 from scrapeline.catalog.sites import SITE_CATEGORIES
 from scrapeline.errors import DatasetError
+from scrapeline.ops import events
 from scrapeline.ops.events import EVENTS_CHANNEL, Event, PostgresEventBus
 from scrapeline.ops.runs import sync_source
 from scrapeline.registry.config import SourceConfig
@@ -74,6 +76,38 @@ def test_sync_source_links_site_and_dataset(clean_db: Engine) -> None:
         row = conn.execute(select(t.sources)).one()
         host = conn.execute(select(t.site.c.host).where(t.site.c.id == row.site_id)).scalar_one()
     assert (row.dataset, row.jurisdiction_id, host) == ("product", None, "books.toscrape.com")
+
+
+def test_a_failed_event_never_breaks_the_callers_transaction(
+    clean_db: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken_insert(conn: Connection, event: Event) -> int:
+        conn.execute(text("SELECT 1 / 0"))
+        return 0
+
+    monkeypatch.setattr(events, "_insert_and_notify", broken_insert)
+    with clean_db.begin() as conn:
+        assert events.publish_in(conn, Event(kind="run.started")) is None
+        ensure_site(conn, "example.org")  # the transaction is still usable
+    with clean_db.connect() as conn:
+        assert conn.execute(select(t.site.c.host)).scalar_one() == "example.org"
+
+
+def test_history_rows_obey_their_constraints(clean_db: Engine) -> None:
+    with clean_db.begin() as conn:
+        site_id = ensure_site(conn, "example.org")
+    with pytest.raises(IntegrityError), clean_db.begin() as conn:
+        conn.execute(
+            t.classification_log.insert().values(
+                site_id=site_id,
+                new_category="shopping",
+                method="rule",
+                taxonomy_version=1,
+                actor="test",
+            )
+        )
+    with pytest.raises(IntegrityError), clean_db.begin() as conn:
+        conn.execute(t.site.update().values(category_method="guess"))
 
 
 def test_published_events_are_stored_and_notified(clean_db: Engine) -> None:

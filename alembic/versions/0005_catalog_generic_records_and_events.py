@@ -2,7 +2,7 @@
 
 Revision ID: 0005
 Revises: 0004
-Create Date: 2026-11-24 00:15:08.543077
+Create Date: 2026-11-24 00:29:10.546596
 """
 
 from collections.abc import Sequence
@@ -57,6 +57,7 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
             nullable=False,
         ),
+        sa.CheckConstraint("storage IN ('generic', 'typed')", name=op.f("ck_dataset_type_storage")),
         sa.PrimaryKeyConstraint("name", "version", name=op.f("pk_dataset_type")),
         schema="catalog",
     )
@@ -97,6 +98,9 @@ def upgrade() -> None:
         sa.Column("message", sa.Text(), server_default="", nullable=False),
         sa.Column(
             "data", postgresql.JSONB(astext_type=sa.Text()), server_default="{}", nullable=False
+        ),
+        sa.CheckConstraint(
+            "level IN ('debug', 'info', 'warning', 'error')", name=op.f("ck_event_level")
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_event")),
         schema="ops",
@@ -139,6 +143,13 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
             nullable=False,
         ),
+        sa.CheckConstraint(
+            "category_method IN ('rule', 'evidence', 'llm', 'human', 'none')",
+            name=op.f("ck_site_category_method"),
+        ),
+        sa.CheckConstraint(
+            "category_confidence BETWEEN 0 AND 1", name=op.f("ck_site_category_confidence")
+        ),
         sa.ForeignKeyConstraint(
             ["category"],
             ["catalog.site_category.code"],
@@ -168,7 +179,20 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.ForeignKeyConstraint(
-            ["site_id"], ["catalog.site.id"], name=op.f("fk_classification_log_site_id_site")
+            ["new_category"],
+            ["catalog.site_category.code"],
+            name=op.f("fk_classification_log_new_category_site_category"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["old_category"],
+            ["catalog.site_category.code"],
+            name=op.f("fk_classification_log_old_category_site_category"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["site_id"],
+            ["catalog.site.id"],
+            name=op.f("fk_classification_log_site_id_site"),
+            ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_classification_log")),
         schema="catalog",
@@ -223,6 +247,7 @@ def upgrade() -> None:
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
         sa.Column("record_id", sa.BigInteger(), nullable=False),
         sa.Column("version", sa.Integer(), nullable=False),
+        sa.Column("schema_version", sa.Integer(), nullable=False),
         sa.Column("change_type", sa.String(length=10), nullable=False),
         sa.Column("payload", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column("content_hash", sa.String(length=64), nullable=True),
@@ -236,8 +261,19 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
             nullable=False,
         ),
+        sa.CheckConstraint(
+            "(payload IS NULL) = (change_type = 'removed')",
+            name=op.f("ck_record_versions_payload_presence"),
+        ),
+        sa.CheckConstraint(
+            "change_type IN ('insert', 'update', 'removed', 'restored')",
+            name=op.f("ck_record_versions_change_type"),
+        ),
         sa.ForeignKeyConstraint(
-            ["record_id"], ["data.records.id"], name=op.f("fk_record_versions_record_id_records")
+            ["record_id"],
+            ["data.records.id"],
+            name=op.f("fk_record_versions_record_id_records"),
+            ondelete="CASCADE",
         ),
         sa.ForeignKeyConstraint(
             ["run_id"], ["ops.run.id"], name=op.f("fk_record_versions_run_id_run")

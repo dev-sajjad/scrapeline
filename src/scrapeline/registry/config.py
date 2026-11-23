@@ -109,7 +109,7 @@ class SourceConfig(_Strict):
     politeness: Politeness = Politeness()
     legal: Legal
     schema_: str = Field(default="Meeting", alias="schema")
-    dataset: str | None = None
+    dataset: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]{0,62}$")
     locale: Locale = Locale()
     usage: UsageRights = UsageRights()
     watermark: WatermarkConfig = WatermarkConfig()
@@ -140,8 +140,13 @@ class SourceConfig(_Strict):
 
     @property
     def dataset_name(self) -> str:
-        """Dataset type this source produces; typed civic sources use their schema name."""
-        return self.dataset or self.schema_
+        """Canonical dataset name ('meeting', 'product'); legacy `schema: Meeting` maps to it."""
+        from scrapeline.pipeline.models import SCHEMAS
+
+        if self.dataset:
+            return self.dataset
+        model = SCHEMAS.get(self.schema_)
+        return model.record_type if model else self.schema_.lower()
 
     @property
     def hosts(self) -> list[str]:

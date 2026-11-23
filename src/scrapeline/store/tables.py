@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from sqlalchemy import (
     BigInteger,
+    CheckConstraint,
     Column,
     Date,
     DateTime,
@@ -397,6 +398,10 @@ site = Table(
     _ts("classified_at", nullable=True),
     _ts("created_at", default=True),
     _ts("updated_at", default=True),
+    CheckConstraint(
+        "category_method IN ('rule', 'evidence', 'llm', 'human', 'none')", name="category_method"
+    ),
+    CheckConstraint("category_confidence BETWEEN 0 AND 1", name="category_confidence"),
     schema="catalog",
 )
 
@@ -404,9 +409,15 @@ classification_log = Table(
     "classification_log",
     metadata,
     Column("id", BigInteger, primary_key=True, autoincrement=True),
-    Column("site_id", BigInteger, ForeignKey("catalog.site.id"), nullable=False, index=True),
-    Column("old_category", String(30)),
-    Column("new_category", String(30), nullable=False),
+    Column(
+        "site_id",
+        BigInteger,
+        ForeignKey("catalog.site.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("old_category", String(30), ForeignKey("catalog.site_category.code")),
+    Column("new_category", String(30), ForeignKey("catalog.site_category.code"), nullable=False),
     Column("confidence", Float),
     Column("method", String(20), nullable=False),
     Column("evidence", JSONB, nullable=False, server_default="[]"),
@@ -428,6 +439,7 @@ dataset_type = Table(
     Column("key_fields", JSONB, nullable=False),
     Column("definition_hash", String(64), nullable=False),
     _ts("created_at", default=True),
+    CheckConstraint("storage IN ('generic', 'typed')", name="storage"),
     schema="catalog",
 )
 
@@ -449,9 +461,12 @@ record_versions = Table(
     "record_versions",
     metadata,
     Column("id", BigInteger, primary_key=True, autoincrement=True),
-    Column("record_id", BigInteger, ForeignKey("data.records.id"), nullable=False),
+    Column(
+        "record_id", BigInteger, ForeignKey("data.records.id", ondelete="CASCADE"), nullable=False
+    ),
     Column("version", Integer, nullable=False),
-    Column("change_type", String(10), nullable=False),  # insert | update | removed | restored
+    Column("schema_version", Integer, nullable=False),
+    Column("change_type", String(10), nullable=False),
     Column("payload", JSONB),
     Column("content_hash", String(64)),
     _ts("valid_from"),
@@ -460,6 +475,10 @@ record_versions = Table(
     Column("raw_sha256", String(64)),
     _ts("created_at", default=True),
     UniqueConstraint("record_id", "version", name="uq_record_versions_record_version"),
+    CheckConstraint(
+        "change_type IN ('insert', 'update', 'removed', 'restored')", name="change_type"
+    ),
+    CheckConstraint("(payload IS NULL) = (change_type = 'removed')", name="payload_presence"),
     schema="data",
 )
 
@@ -478,5 +497,6 @@ event = Table(
     Index("ix_event_at", "at"),
     Index("ix_event_run_id", "run_id"),
     Index("ix_event_source_id_at", "source_id", "at"),
+    CheckConstraint("level IN ('debug', 'info', 'warning', 'error')", name="level"),
     schema="ops",
 )

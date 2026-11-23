@@ -24,6 +24,8 @@ class Record(BaseModel):
     schema_version: ClassVar[int]
     # Fields that do not participate in content_hash (identity / provenance).
     hash_exclude: ClassVar[frozenset[str]] = frozenset({"external_id", "canonical_url"})
+    hash_skip_none: ClassVar[bool] = False
+    hash_includes_version: ClassVar[bool] = True
 
     external_id: str
     canonical_url: str | None = None

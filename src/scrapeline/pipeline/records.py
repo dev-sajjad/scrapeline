@@ -7,9 +7,17 @@ Identity is (source_id, dataset, external_id). For every validated record of a r
     known identity, same content hash -> last_seen_at bumped only, no version
     removed identity seen again       -> removed_at cleared, version 'restored' (with payload)
 
-`mark_removed` runs only after a complete crawl (every page reached, no fetch errors): records
-of the source and dataset not seen in that run get removed_at = now and a 'removed' version with
-a NULL payload. Versions are append-only; `valid_from` is the observation's fetched_at.
+Rules every implementation must keep:
+- Versions are append-only and numbered 1, 2, 3... per record; consumers order by `version`.
+- `valid_from` is the observation's fetched_at, but never earlier than the previous version's
+  valid_from (reprocessing old raw must not put history out of order). A 'removed' version
+  uses the time the run detected the removal (the run's start time).
+- Each version stores the dataset's `schema_version` at write time.
+- `mark_removed` runs only after a complete incremental run: every page reached, no fetch or
+  parse errors, no rejects, and the page limit not hit. Reprocess and backfill runs never
+  mark removals. Removed records get removed_at and a 'removed' version with a NULL payload.
+- Personal-data fields (FieldDef.pii) are set to None before hashing and storage unless the
+  source's `usage.allow_pii` is true, so they never enter the append-only history.
 """
 
 from __future__ import annotations
