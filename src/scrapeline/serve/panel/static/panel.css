@@ -124,7 +124,6 @@ p { margin: 0 0 10px; }
 }
 .verdict h1 { margin-bottom: 4px; }
 .verdict p { margin: 0; font-size: 15px; }
-.verdict ul { margin: 6px 0 0; padding-left: 18px; }
 .verdict-ok { border-left-color: var(--ok); }
 .verdict-attention { border-left-color: var(--warn); }
 .verdict-bad { border-left-color: var(--bad); }
@@ -278,8 +277,6 @@ pre {
 }
 td details.json pre { max-width: 60ch; }
 
-.evidence { margin: 0; padding: 0; list-style: none; }
-.evidence li { padding: 2px 0; }
 
 .error h1 { color: var(--bad); margin-bottom: 8px; }
 .footer { max-width: 1280px; margin: 0 auto; padding: 0 24px 24px; color: var(--muted); font-size: 12px; }
