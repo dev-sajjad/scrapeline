@@ -10,8 +10,11 @@ from __future__ import annotations
 
 import importlib
 import pkgutil
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import Engine
@@ -23,7 +26,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from scrapeline import __version__
 from scrapeline.ops.logging import get_logger
 from scrapeline.serve import api
-from scrapeline.serve.panel import pages
+from scrapeline.serve.panel import live, pages
 from scrapeline.serve.panel.deps import STATIC_DIR, render
 from scrapeline.settings import Settings, get_settings
 from scrapeline.store.db import get_engine
@@ -73,6 +76,12 @@ def page_routers() -> list[APIRouter]:
     return [importlib.import_module(f"{pages.__name__}.{name}").router for name in names]
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    yield
+    await live.shutdown(app)
+
+
 def create_app(engine: Engine | None = None, settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     app = FastAPI(
@@ -81,6 +90,7 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
+        lifespan=lifespan,
     )
     app.state.settings = settings
     app.state.engine = engine or get_engine(settings.database_url)
@@ -98,6 +108,7 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
         return "ok"
 
     app.add_exception_handler(StarletteHTTPException, _http_error)
+    app.add_exception_handler(RequestValidationError, _invalid_request)
     app.add_exception_handler(OperationalError, _database_unavailable)
     app.add_exception_handler(ProgrammingError, _schema_missing)
     return app
@@ -110,6 +121,20 @@ async def _http_error(request: Request, exc: Exception) -> Response:
         "error.html",
         {"title": f"{exc.status_code}", "status": exc.status_code, "message": exc.detail},
         status_code=exc.status_code,
+    )
+
+
+async def _invalid_request(request: Request, exc: Exception) -> HTMLResponse:
+    assert isinstance(exc, RequestValidationError)
+    problems = "; ".join(
+        f"{'.'.join(str(part) for part in error['loc'][1:])}: {error['msg']}"
+        for error in exc.errors()
+    )
+    return render(
+        request,
+        "error.html",
+        {"title": "Invalid request", "status": 422, "message": problems},
+        status_code=422,
     )
 
 

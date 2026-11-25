@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from fastapi import APIRouter
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 
@@ -53,6 +54,27 @@ def test_unknown_page_renders_the_error_template(client: TestClient) -> None:
     assert response.status_code == 404
     assert "text/html" in response.headers["content-type"]
     assert "Back to health" in response.text
+
+
+def test_invalid_query_renders_an_html_422(client: TestClient) -> None:
+    router = APIRouter()
+
+    @router.get("/probe")
+    def probe(limit: int) -> str:
+        return str(limit)
+
+    client.app.include_router(router)  # type: ignore[attr-defined]
+    response = client.get("/probe", params={"limit": "many"})
+    assert response.status_code == 422
+    assert "text/html" in response.headers["content-type"]
+    assert "limit" in response.text
+
+
+def test_lifespan_runs_and_stops_cleanly() -> None:
+    engine = create_engine("postgresql+psycopg://nobody:nothing@127.0.0.1:1/none")
+    settings = Settings(_env_file=None, panel_allowed_hosts=["testserver"])
+    with TestClient(create_app(engine=engine, settings=settings)) as client:
+        assert client.get("/healthz").text == "ok"
 
 
 def test_database_down_gives_a_helpful_503(client: TestClient) -> None:
