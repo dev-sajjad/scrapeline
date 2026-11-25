@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% from "live/_macros.html" import live_feed %}
+{% block content %}
+<h1>Live events</h1>
+<p>
+  Every step of the platform writes an event: a run starts, records are loaded, quality checks
+  finish, a run succeeds or fails. This page shows the latest {{ replay_limit }} events that match
+  the filters, then adds new ones at the top as they happen.
+</p>
+<details>
+  <summary>What the events mean</summary>
+  <dl>
+    <dt><code>run.started</code>, <code>run.finished</code>, <code>run.failed</code></dt>
+    <dd>A run of a source began, succeeded or failed. A failed run carries the error as its message.</dd>
+    <dt><code>records.loaded</code></dt>
+    <dd>Validated records were written. The data counts inserts, updates, unchanged rows and removals.</dd>
+    <dt><code>checks.done</code></dt>
+    <dd>Quality checks ran after a load. Level warning or error means at least one check did not pass.</dd>
+    <dt><code>site.classified</code></dt>
+    <dd>A site got a category, from the classifier or from a person.</dd>
+    <dt>Levels</dt>
+    <dd>debug, info, warning and error. Choose a minimum level to hide routine events.</dd>
+    <dt>Kind prefix</dt>
+    <dd><code>run</code> matches every <code>run.*</code> event; <code>run.failed</code> matches only that kind.</dd>
+  </dl>
+</details>
+
+<form class="filters" method="get" action="/live" role="search" aria-label="Filter events">
+  <p>
+  <label for="live-source">Source</label>
+  <select id="live-source" name="source_id">
+    <option value="">All sources</option>
+    {% for source_id in source_ids %}
+    <option value="{{ source_id }}"{% if source_id == filters.source_id %} selected{% endif %}>{{ source_id }}</option>
+    {% endfor %}
+  </select>
+  <label for="live-kind">Kind prefix</label>
+  <input id="live-kind" name="kind" value="{{ filters.kind_prefix or '' }}" list="live-kinds"
+         placeholder="run or records.loaded" maxlength="50" pattern="[a-z_]+(\.[a-z_]+)*">
+  <datalist id="live-kinds">
+    {% for kind in kinds %}<option value="{{ kind }}">{% endfor %}
+  </datalist>
+  <label for="live-level">Minimum level</label>
+  <select id="live-level" name="level">
+    <option value="">Any</option>
+    {% for level in levels %}
+    <option value="{{ level }}"{% if level == filters.min_level %} selected{% endif %}>{{ level }}</option>
+    {% endfor %}
+  </select>
+  {% if filters.run_id %}<input type="hidden" name="run_id" value="{{ filters.run_id }}">{% endif %}
+  <button type="submit">Apply</button>
+  <a href="/live">Clear filters</a>
+  </p>
+</form>
+
+{% if filters.run_id %}
+<p>
+  Only events of run <a href="/runs/{{ filters.run_id }}"><code>{{ filters.run_id }}</code></a>.
+  <a href="{{ request.url.remove_query_params('run_id') }}">Show every run</a>
+</p>
+{% endif %}
+
+{{ live_feed(filters.source_id, filters.run_id, filters.kind_prefix, filters.min_level, initial=initial) }}
+{% endblock %}

@@ -1,0 +1,12 @@
+{%- from "live/_macros.html" import level_badge -%}
+<tr>
+  <td><time datetime="{{ event.at.isoformat() }}">{{ event.at.strftime("%Y-%m-%d %H:%M:%S") }}</time></td>
+  <td>{{ level_badge(event.level) }} <code>{{ event.kind }}</code></td>
+  <td>
+    {%- if event.source_id %}<a href="/sources/{{ event.source_id | urlencode | replace('/', '%2F') }}">{{ event.source_id }}</a>{% else %}—{% endif %}
+    {%- if event.run_id %}<br><a href="/runs/{{ event.run_id }}" title="Run {{ event.run_id }}">run {{ event.run_id | short(8) }}</a>{% endif -%}
+  </td>
+  <td>{{ event.message or "—" }}
+    {%- if data_json %}<details><summary>Data</summary><pre>{{ data_json }}</pre></details>{% endif -%}
+  </td>
+</tr>

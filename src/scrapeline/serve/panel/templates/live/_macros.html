@@ -1,10 +1,43 @@
-{# Live event feed. The stream first replays recent events, then pushes new ones. #}
-{% macro live_feed(source_id=none, run_id=none) -%}
-{% set query = [] %}
-{% if source_id %}{% set _ = query.append(("source_id", source_id)) %}{% endif %}
-{% if run_id %}{% set _ = query.append(("run_id", run_id | string)) %}{% endif %}
-<table class="events">
-  <thead><tr><th>Time</th><th>Event</th><th>Source</th><th>Message</th></tr></thead>
-  <tbody hx-ext="sse" sse-connect="/events/stream?{{ query | urlencode }}" sse-swap="ops" hx-swap="afterbegin"></tbody>
-</table>
+{# Live event feed and its building blocks. #}
+
+{# Event levels share the badge colours of statuses: a warning looks like a warn. #}
+{% macro level_badge(level) -%}
+<span class="badge badge-{{ 'warn' if level == 'warning' else level }}">{{ level }}</span>
+{%- endmacro %}
+
+{#
+  A table of events fed by /events/stream. Filters: source_id, run_id, kind (a dotted prefix
+  such as run or records.loaded) and level (the minimum level).
+
+  The stream first sends `reset`, which empties the table, then replays the latest matching
+  events and adds new ones on top as they happen. A browser that reconnects with
+  Last-Event-ID gets only what it missed, without a reset. `initial` is a list of
+  (event, data as JSON) pairs, newest first, shown before the stream connects; without
+  JavaScript it is all there is. Pages that pass no `initial` link to /live instead.
+#}
+{% macro live_feed(source_id=none, run_id=none, kind=none, level=none, initial=none) -%}
+{% set query = [("source_id", source_id), ("run_id", run_id), ("kind", kind), ("level", level)] | selectattr(1) | list %}
+{% set qs = "?" ~ (query | urlencode) if query else "" %}
+<section class="live-feed" aria-label="Live events" hx-ext="sse" sse-connect="/events/stream{{ qs }}">
+  <div class="live-status" role="status" sse-swap="status"></div>
+  <noscript>
+    {% if initial is none %}
+    <p>Live updates need JavaScript. <a href="/live{{ qs }}">Open the event log</a> to see the latest events.</p>
+    {% else %}
+    <p>Live updates need JavaScript. These are the latest events; reload the page to see newer ones.</p>
+    {% endif %}
+  </noscript>
+  <table class="events" sse-swap="reset" hx-target="find tbody" hx-swap="innerHTML">
+    <thead>
+      <tr><th scope="col">Time (UTC)</th><th scope="col">Event</th><th scope="col">Source and run</th><th scope="col">Message</th></tr>
+    </thead>
+    <tbody sse-swap="ops" hx-target="this" hx-swap="afterbegin" aria-live="polite" aria-relevant="additions">
+      {%- if initial is not none %}
+      {%- for event, data_json in initial %}{% include "live/_event_row.html" %}{% else %}
+      <tr><td colspan="4" class="empty">No events yet.</td></tr>
+      {%- endfor %}
+      {%- endif %}
+    </tbody>
+  </table>
+</section>
 {%- endmacro %}
