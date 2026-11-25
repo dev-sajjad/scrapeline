@@ -80,8 +80,8 @@ ignore = ["S101"]
 "scripts/**" = ["T20", "S", "E501"]
 "src/scrapeline/agents/**" = ["E501"]  # prompt/report strings
 "src/scrapeline/evals/**" = ["E501"]
-"src/scrapeline/cli/**" = ["B008"]
-"src/scrapeline/serve/**" = ["B008"]  # FastAPI Query() defaults  # typer.Option defaults are the typer idiom
+"src/scrapeline/cli/**" = ["B008"]  # typer.Option defaults are the typer idiom
+"src/scrapeline/serve/**" = ["B008"]  # FastAPI Query() defaults
 
 [tool.mypy]
 python_version = "3.12"

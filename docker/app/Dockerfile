@@ -1,4 +1,4 @@
-# One image for dev shell, CI and the trusted worker.
+# One image for dev shell, CI, the trusted worker and the control panel.
 # Base tag MUST match the `playwright==` pin in pyproject.toml (browsers + system deps preinstalled).
 FROM mcr.microsoft.com/playwright/python:v1.65.2-noble
 
@@ -20,13 +20,13 @@ WORKDIR /app
 
 # Dependencies first for layer caching.
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-install-project --python /usr/bin/python3.12 --group dev
+RUN uv sync --frozen --no-install-project --python /usr/bin/python3.12 --group dev --extra serve
 
 COPY src ./src
 COPY alembic ./alembic
 COPY alembic.ini ./
 COPY config ./config
-RUN uv sync --frozen --python /usr/bin/python3.12 --group dev
+RUN uv sync --frozen --python /usr/bin/python3.12 --group dev --extra serve
 
 RUN mkdir -p /data/raw && chown -R pwuser:pwuser /data
 

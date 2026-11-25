@@ -1,0 +1,37 @@
+{# Display helpers for stored values. Scraped values are never marked safe. #}
+
+{% macro cell(c) -%}
+{%- if c.href -%}
+<a href="{{ c.href }}" rel="noopener noreferrer nofollow"{% if c.full %} title="{{ c.full }}"{% endif %}>{{ c.text }}</a>
+{%- elif c.full -%}
+<span title="{{ c.full }}">{{ c.text }}</span>
+{%- elif c.empty -%}
+<span class="muted">{{ c.text }}</span>
+{%- else -%}
+{{ c.text }}
+{%- endif -%}
+{%- endmacro %}
+
+{# History change types reuse the shared status colours: new and back are good, gone is bad. #}
+{% set change_classes = {"insert": "ok", "restored": "ok", "removed": "error", "update": "update"} %}
+{% macro change(kind) -%}
+<span class="badge badge-{{ change_classes.get(kind, kind) }}">{{ kind }}</span>
+{%- endmacro %}
+
+{% macro field_flags(f) -%}
+{%- if f and f.key %} <abbr title="Key field: part of the record identity">key</abbr>{% endif -%}
+{%- if f and f.pii %} <abbr title="Personal data: stored only when the source's usage allows it">personal</abbr>{% endif -%}
+{%- endmacro %}
+
+{# A field name that may wrap after its underscores, so narrow columns stay narrow. #}
+{% macro breakable(name) -%}
+{%- for part in name.split("_") %}{{ part }}{% if not loop.last %}_<wbr>{% endif %}{% endfor -%}
+{%- endmacro %}
+
+{% macro raw_link(sha) -%}
+{%- if sha -%}<a class="mono" href="/storage/raw/{{ sha }}">{{ sha | short }}</a>{%- else -%}<span class="muted">—</span>{%- endif -%}
+{%- endmacro %}
+
+{% macro run_link(run_id) -%}
+{%- if run_id -%}<a class="mono" href="/runs/{{ run_id }}">{{ run_id | short(8) }}</a>{%- else -%}<span class="muted">—</span>{%- endif -%}
+{%- endmacro %}

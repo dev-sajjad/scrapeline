@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge, empty, reltime, ext_link, json_block %}
+{% from "sources/_parts.html" import attention_flags, last_run_cell %}
+{% from "runs/_table.html" import runs_table %}
+{% from "incidents/_table.html" import incidents_table %}
+{% from "live/_macros.html" import live_feed %}
+{% block content %}
+<div class="page-head">
+  <div class="crumbs"><a href="/sources">Sources</a></div>
+  <h1>{{ source.id }}</h1>
+  <p class="lede">{{ source.name }} {{ badge(source.status) }} {{ attention_flags(source.attention) }}</p>
+</div>
+
+{% if source.status_note %}
+<p class="notice">{{ source.status_note }}</p>
+{% endif %}
+{% if config.terms_unreviewed %}
+<p class="notice notice-bad">Terms not reviewed: <code>legal.terms_checked</code> is {{ config.terms_checked or "missing" }}. Review the site's terms and robots.txt before this source can be activated.</p>
+{% endif %}
+
+<dl class="stats">
+  <div><dt>Last run</dt><dd>{{ last_run_cell(source.last_run) }}</dd></div>
+  <div><dt>Records</dt><dd>{{ source.records | number }}</dd></div>
+  <div{% if source.open_incidents %} class="is-bad"{% endif %}><dt>Open incidents</dt><dd>{{ source.open_incidents | number }}</dd></div>
+  <div><dt>Cadence</dt><dd>{{ source.cadence }}</dd></div>
+</dl>
+
+<div class="panels">
+<section aria-labelledby="h-source">
+  <h2 id="h-source">Source</h2>
+  <dl class="kv">
+    <div><dt>Status</dt><dd>{{ badge(source.status) }}{% if source.status_note %} <span class="muted">{{ source.status_note }}</span>{% endif %}</dd></div>
+    <div><dt>Platform</dt><dd>{{ source.platform }}{% if source.tenant %} <span class="muted">tenant</span> {{ source.tenant }}{% endif %}</dd></div>
+    <div><dt>Kind</dt><dd>{{ config.kind or "—" }}</dd></div>
+    <div><dt>Entry URL</dt><dd class="mono">{{ ext_link(config.entry) }}</dd></div>
+    {% if config.allowed_hosts %}<div><dt>Also allowed</dt><dd class="mono">{{ config.allowed_hosts | join(", ") }}</dd></div>{% endif %}
+    <div><dt>Dataset</dt><dd>{% if source.dataset %}<a href="/data/{{ source.dataset | urlencode }}">{{ source.dataset }}</a>{% else %}—{% endif %}</dd></div>
+    <div><dt>Site</dt><dd>{% if source.host %}<a href="/sites/{{ source.host | urlencode }}">{{ source.host }}</a> <span class="muted">{{ source.category_label or source.category }}</span>{% else %}—{% endif %}</dd></div>
+    <div><dt>Adapter</dt><dd class="mono">{{ config.adapter or "—" }}</dd></div>
+    <div><dt>Watermark</dt><dd>{{ reltime(source.watermark) }}</dd></div>
+    <div><dt>Config version</dt><dd>{{ source.config_version }}</dd></div>
+    <div><dt>Registered</dt><dd>{{ reltime(source.created_at) }}</dd></div>
+    <div><dt>Updated</dt><dd>{{ reltime(source.updated_at) }}</dd></div>
+  </dl>
+</section>
+
+<section aria-labelledby="h-rules">
+  <h2 id="h-rules">Locale, legal and usage</h2>
+  <dl class="kv">
+    {% for key, value in config.locale.items() %}
+    <div><dt>Locale {{ key | replace("_", " ") }}</dt><dd>{{ value }}</dd></div>
+    {% endfor %}
+    <div><dt>Terms checked</dt><dd>{% if config.terms_unreviewed %}{{ badge("not reviewed", "unreviewed") }} <span class="muted">{{ config.terms_checked or "missing" }}</span>{% else %}{{ config.terms_checked }}{% endif %}</dd></div>
+    {% if config.legal_notes %}<div><dt>Legal notes</dt><dd>{{ config.legal_notes }}</dd></div>{% endif %}
+    <div><dt>Purpose</dt><dd>{{ config.usage.purpose or "—" }}</dd></div>
+    <div><dt>Personal data</dt><dd>
+      {%- if config.personal_data == "kept" %}kept <span class="muted">allow_pii with a stated purpose</span>
+      {%- elif config.personal_data == "no-purpose" %}blanked before storage {{ badge("no purpose", "warn") }} <span class="muted">allow_pii is set, but personal data is kept only with a purpose</span>
+      {%- elif config.personal_data == "unreadable" %}blanked before storage <span class="muted">the usage block does not validate</span>
+      {%- else %}blanked before storage{% endif -%}
+    </dd></div>
+    <div><dt>Retention</dt><dd>{% if config.usage.retention_days %}{{ config.usage.retention_days | number }} days{% else %}not set{% endif %}</dd></div>
+    {% if config.usage.license %}<div><dt>Licence</dt><dd>{{ config.usage.license }}</dd></div>{% endif %}
+  </dl>
+</section>
+</div>
+
+<h2>Stored rows</h2>
+{% if stored %}
+<div class="table-wrap">
+<table>
+  <thead><tr><th scope="col">Store</th><th scope="col" class="num">Rows</th></tr></thead>
+  <tbody>
+    {% for label, n in stored %}
+    <tr><th scope="row">{{ label }}</th><td class="num">{{ n | number }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+{{ empty("Nothing stored yet. Rows appear after the first successful run.") }}
+{% endif %}
+
+<h2>Config</h2>
+{{ json_block(config.raw, "Show the stored config") }}
+
+<div class="section-head">
+  <h2>Recent runs</h2>
+  {% if runs %}<a href="/runs?source_id={{ source.id | urlencode }}">All runs of this source</a>{% endif %}
+</div>
+{% if runs %}
+{{ runs_table(runs, show_source=false) }}
+{% else %}
+{{ empty("This source has not run yet.") }}
+{% endif %}
+
+<div class="section-head">
+  <h2>Incidents</h2>
+  {% if incidents %}<a href="/incidents?source_id={{ source.id | urlencode }}&amp;status=all">All incidents of this source</a>{% endif %}
+</div>
+{% if incidents %}
+{{ incidents_table(incidents, show_source=false) }}
+{% else %}
+{{ empty("No incidents for this source.") }}
+{% endif %}
+
+<h2>Scraper versions</h2>
+{% if versions %}
+<div class="table-wrap">
+<table>
+  <thead><tr><th scope="col">Version</th><th scope="col">Adapter</th><th scope="col">Code hash</th><th scope="col">Author</th><th scope="col">First seen</th></tr></thead>
+  <tbody>
+    {% for version in versions %}
+    <tr>
+      <th scope="row">{{ version.id }}</th>
+      <td class="mono wrap">{{ version.adapter }}</td>
+      <td class="mono" title="{{ version.code_hash }}">{{ version.code_hash | short(12) }}</td>
+      <td>{{ version.author }}</td>
+      <td class="nowrap">{{ reltime(version.created_at) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+{{ empty("No scraper version recorded yet; one is recorded with the first run.") }}
+{% endif %}
+
+<h2>Live events</h2>
+{{ live_feed(source_id=source.id) }}
+{% endblock %}

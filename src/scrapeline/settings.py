@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     sources_dir: Path = PROJECT_ROOT / "config" / "sources"
     datasets_dir: Path = PROJECT_ROOT / "config" / "datasets"
     lake_dir: Path = PROJECT_ROOT / "data" / "lake"
+    # DuckDB file that dbt builds from the lake; the panel opens it read-only.
+    warehouse_path: Path = PROJECT_ROOT / "data" / "warehouse.duckdb"
 
     # Crawler identity: public contact only.
     crawler_user_agent: str = "scrapeline/0.1 (+https://github.com/dev-sajjad/scrapeline)"
@@ -43,6 +45,9 @@ class Settings(BaseSettings):
     model_repair: str = "claude-opus-5-5"
     model_cheap: str = "claude-haiku-5-5"
     agent_max_usd_per_run: float = 2.0
+
+    # Control panel. Requests for any other Host are refused, which blocks DNS rebinding.
+    panel_allowed_hosts: list[str] = Field(default_factory=lambda: ["localhost", "127.0.0.1"])
 
     # Sandbox for agent-generated parsers.
     sandbox_image: str = "scrapeline-sandbox:latest"

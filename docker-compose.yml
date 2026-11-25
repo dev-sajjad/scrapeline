@@ -1,7 +1,9 @@
 # Works with any Docker Engine API runtime: Kiri, Docker Desktop, OrbStack, Colima.
 #   docker compose up -d                     postgres + fixture sites (dev; app runs via uv or `make shell`)
+#   docker compose --profile panel up -d     adds the control panel on http://localhost:8000
 #   docker compose --profile app run app ... one-off CLI inside the production image
-#   docker compose --profile prod up -d      adds the trusted worker
+#   docker compose --profile prod up -d      adds the trusted worker and the panel
+# Data stays on this machine: raw files, the lake and the warehouse live in ./data.
 # The agent sandbox is not a compose service: tester.py runs it with `docker run --network none` (ADR-0004).
 services:
   postgres:
@@ -38,7 +40,9 @@ services:
       DATABASE_URL: postgresql+psycopg://scrapeline:scrapeline@postgres:5432/scrapeline
       FIXTURE_BASE_URL: http://fixtures
       RAW_STORE_DIR: /data/raw
-    volumes: ["rawdata:/data"]
+      LAKE_DIR: /data/lake
+      WAREHOUSE_PATH: /data/warehouse.duckdb
+    volumes: ["./data:/data"]
     depends_on:
       postgres: { condition: service_healthy }
       fixtures: { condition: service_healthy }
@@ -51,6 +55,21 @@ services:
       resources:
         limits: { memory: 2g }
 
+  # Read-only control panel. Published on localhost only; the panel itself also refuses other Host names.
+  panel:
+    <<: *app
+    profiles: ["panel", "prod"]
+    entrypoint: ["uvicorn"]
+    # Open live streams end after 3 s on shutdown instead of holding the stop until SIGKILL.
+    command: ["scrapeline.serve.panel.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "3"]
+    ports: ["127.0.0.1:8000:8000"]
+    volumes: ["./data:/data:ro"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
+      interval: 5s
+      retries: 20
+
 volumes:
   pgdata:
-  rawdata:

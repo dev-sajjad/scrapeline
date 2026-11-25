@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% from "_macros.html" import empty %}
+{% block content %}
+<h1>Storage</h1>
+<p>Where the data lives, from the immutable raw responses to the analytics warehouse.
+Everything after the raw store can be rebuilt from it.</p>
+
+<h2 id="raw">Raw store</h2>
+<dl class="stats">
+  <div><dt>Objects</dt><dd>{{ raw_totals.files | number }}</dd></div>
+  <div><dt>Size</dt><dd>{{ raw_totals.bytes | bytes }}</dd></div>
+  <div><dt>Sources</dt><dd>{{ by_source | length | number }}</dd></div>
+</dl>
+<div class="table-wrap">
+<table>
+  <tbody>
+    <tr><th scope="row">Root</th><td class="mono">{{ raw_root }}{% if not raw_root_exists %} <span class="muted">(not created yet)</span>{% endif %}</td></tr>
+    <tr><th scope="row">Key layout</th><td class="mono">{{ key_layout }}</td></tr>
+    <tr><th scope="row">Rules</th><td>Every response is stored once under its SHA-256 before parsing and is never modified.</td></tr>
+  </tbody>
+</table>
+</div>
+
+{% if by_source %}
+<h3>By source</h3>
+<p>Objects and sizes count the raw files per source, from the fetch log. Bytes fetched again on another day are stored again under that day.</p>
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th scope="col">Source</th>
+      <th scope="col" class="num">Objects</th>
+      <th scope="col" class="num">Size</th>
+      <th scope="col" class="num">Fetches</th>
+      <th scope="col">Last fetch</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in by_source %}
+    <tr>
+      <th scope="row"><a href="/sources/{{ row.source_id }}">{{ row.source_id }}</a></th>
+      <td class="num">{{ row.files | number }}</td>
+      <td class="num">{{ row.bytes | bytes }}</td>
+      <td class="num">{{ row.fetches | number }}</td>
+      <td>{{ row.last_fetch | dt }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+{% if recent %}
+<h3>Latest raw files</h3>
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th scope="col">Object</th>
+      <th scope="col">Source</th>
+      <th scope="col">URL</th>
+      <th scope="col">Type</th>
+      <th scope="col" class="num">Size</th>
+      <th scope="col">Fetched</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in recent %}
+    <tr>
+      <th scope="row"><a class="mono" href="/storage/raw/{{ row.raw_sha256 }}">{{ row.raw_sha256 | short }}</a></th>
+      <td>{{ row.source_id }}</td>
+      <td class="mono" title="{{ row.url }}">{{ row.url | short(60) }}</td>
+      <td>{{ row.content_type or "—" }}</td>
+      <td class="num">{{ row.nbytes | bytes }}</td>
+      <td>{{ row.fetched_at | dt }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+{{ empty("Nothing fetched yet. Raw files appear here after the first run.") }}
+{% endif %}
+
+<h2 id="database">Database</h2>
+<p>PostgreSQL tables by schema, {{ db_bytes | bytes }} in total. Row counts are the planner's
+estimates; "—" means the table has not been analysed yet.</p>
+{% if db_tables %}
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th scope="col">Table</th>
+      <th scope="col" class="num">Estimated rows</th>
+      <th scope="col" class="num">Size</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in db_tables %}
+    <tr>
+      <th scope="row" class="mono">{{ row.schema }}.{{ row.name }}</th>
+      <td class="num">{% if row.estimated_rows is none or row.estimated_rows < 0 %}<span class="muted">—</span>{% else %}{{ row.estimated_rows | int | number }}{% endif %}</td>
+      <td class="num">{{ row.bytes | bytes }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+{{ empty("No tables found. Run: make migrate") }}
+{% endif %}
+
+<h2 id="lake">Lake</h2>
+<p>Parquet files under <span class="mono">{{ lake_dir }}</span>, read by dbt. Append tables gain
+new files on every export; snapshot tables are rewritten whole.</p>
+{% if lake_problem %}
+<p role="alert">The lake could not be read: {{ lake_problem }}</p>
+{% elif not lake_exported %}
+{{ empty("The lake has not been exported yet. Run: make lake") }}
+{% else %}
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th scope="col">Table</th>
+      <th scope="col">Mode</th>
+      <th scope="col" class="num">Files</th>
+      <th scope="col" class="num">Rows</th>
+      <th scope="col">Last export</th>
+      <th scope="col">Watermark</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in lake_tables %}
+    <tr>
+      <th scope="row" class="mono">{{ row.name }}</th>
+      <td>{{ row.mode }}</td>
+      <td class="num">{{ row.files | number }}</td>
+      <td class="num">{{ row.rows | number }}</td>
+      <td>{% if row.exported_at %}<span title="Export {{ row.export_id }}">{{ row.exported_at | dt }}</span> <span class="muted">({{ row.exported_rows | number }} rows written)</span>{% else %}<span class="muted">never</span>{% endif %}</td>
+      <td>{{ row.watermark | dt }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+<h2 id="warehouse">Warehouse</h2>
+{% if warehouse %}
+<div class="table-wrap">
+<table>
+  <tbody>
+    <tr><th scope="row">File</th><td class="mono">{{ warehouse_path }}</td></tr>
+    <tr><th scope="row">Size</th><td>{{ warehouse.bytes | bytes }}</td></tr>
+    <tr><th scope="row">Built</th><td>{{ warehouse.modified | dt }} ({{ warehouse.modified | ago }})</td></tr>
+  </tbody>
+</table>
+</div>
+<p><a href="/marts">Browse the marts</a></p>
+{% else %}
+{{ empty("No DuckDB warehouse at " ~ warehouse_path ~ " yet. Build it with: make dbt") }}
+{% endif %}
+{% endblock %}

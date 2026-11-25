@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="htmx-config" content='{"includeIndicatorStyles": false, "allowEval": false, "allowScriptTags": false}'>
+  <title>{% block title %}{{ title | default("Panel") }}{% endblock %} · scrapeline</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/panel.css">
+  <script src="/static/vendor/htmx-2.0.4.min.js" defer></script>
+  <script src="/static/vendor/htmx-ext-sse-2.2.2.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="topbar">
+    <a class="brand" href="/">scrapeline</a>
+    <nav aria-label="Main">
+      {% for href, label in nav %}
+      <a href="{{ href }}"{% if nav_active(request.url.path, href) %} aria-current="page"{% endif %}>{{ label }}</a>
+      {% endfor %}
+    </nav>
+  </header>
+  <main id="main">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="footer">scrapeline {{ version }} · read-only panel</footer>
+</body>
+</html>

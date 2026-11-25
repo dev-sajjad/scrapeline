@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge, empty, reltime %}
+{% block content %}
+<div class="page-head">
+  <div class="crumbs"><a href="/sites">Sites</a></div>
+  <h1>{{ site.host }}</h1>
+  <p class="lede">{{ site.category_label }} {{ badge(site.category_method) }}</p>
+</div>
+
+<div class="panels">
+<section aria-labelledby="h-category">
+  <h2 id="h-category">Category</h2>
+  <dl class="kv">
+    <div><dt>Category</dt><dd>{{ site.category_label }} <span class="muted">{{ site.description }}</span></dd></div>
+    <div><dt>Confidence</dt><dd>{{ site.category_confidence | percent(0) }}</dd></div>
+    <div><dt>Method</dt><dd>{{ badge(site.category_method) }}{% if site.category_method == "human" %} <span class="muted">set by a person; automatic classification never replaces it</span>{% endif %}</dd></div>
+    <div><dt>Classified</dt><dd>{{ reltime(site.classified_at) }}</dd></div>
+    <div><dt>Tags</dt><dd>{% if site.tags %}{% for tag in site.tags %}{{ badge(tag, "info") }} {% endfor %}{% else %}<span class="muted">none</span>{% endif %}</dd></div>
+  </dl>
+</section>
+
+<section aria-labelledby="h-site">
+  <h2 id="h-site">Site</h2>
+  <dl class="kv">
+    <div><dt>Registered domain</dt><dd>{{ site.registered_domain or "—" }}</dd></div>
+    <div><dt>Country</dt><dd>{{ site.country or "—" }}</dd></div>
+    <div><dt>Language</dt><dd>{{ site.language or "—" }}</dd></div>
+    <div><dt>Platform</dt><dd>{{ site.platform or "—" }}</dd></div>
+    <div><dt>First seen</dt><dd>{{ reltime(site.created_at) }}</dd></div>
+  </dl>
+</section>
+</div>
+
+<h2>Evidence</h2>
+{% if evidence %}
+<div class="table-wrap">
+<table>
+  <thead><tr><th scope="col">Signal</th><th scope="col">Value</th><th scope="col" class="num">Weight</th></tr></thead>
+  <tbody>
+    {% for entry in evidence %}
+    <tr>
+      <th scope="row">{{ entry.signal }}</th>
+      <td class="wrap">{{ entry.value or "—" }}</td>
+      <td class="num">{{ entry.weight | float | number }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+{{ empty("No evidence recorded. The site has not been classified yet.") }}
+{% endif %}
+
+<h2>Classification log <span class="count">{{ log_total | number }}</span></h2>
+{% if history %}
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th scope="col">When</th>
+      <th scope="col">Change</th>
+      <th scope="col">Method</th>
+      <th scope="col" class="num">Confidence</th>
+      <th scope="col">Actor</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for entry in history %}
+    <tr>
+      <th scope="row" class="nowrap">{{ reltime(entry.created_at) }}</th>
+      <td>{{ entry.old_label or "none" }} → {{ entry.new_label }}</td>
+      <td>{{ badge(entry.method) }}</td>
+      <td class="num">{{ entry.confidence | percent(0) }}</td>
+      <td>{{ entry.actor }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% if log_total > history | length %}
+<p class="table-note">The {{ history | length }} newest of {{ log_total | number }} changes.</p>
+{% endif %}
+{% else %}
+{{ empty("No classification changes logged.") }}
+{% endif %}
+
+<h2>Sources on this site</h2>
+{% if sources %}
+<div class="table-wrap">
+<table>
+  <thead><tr><th scope="col">Source</th><th scope="col">Name</th><th scope="col">Status</th><th scope="col">Dataset</th><th scope="col">Platform</th></tr></thead>
+  <tbody>
+    {% for source in sources %}
+    <tr>
+      <th scope="row"><a href="/sources/{{ source.id | urlencode }}">{{ source.id }}</a></th>
+      <td class="wrap">{{ source.name }}</td>
+      <td>{{ badge(source.status) }}</td>
+      <td>{% if source.dataset %}<a href="/data/{{ source.dataset | urlencode }}">{{ source.dataset }}</a>{% else %}—{% endif %}</td>
+      <td>{{ source.platform }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+{{ empty("No sources use this site.") }}
+{% endif %}
+{% endblock %}

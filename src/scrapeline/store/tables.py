@@ -501,3 +501,14 @@ event = Table(
     CheckConstraint("level IN ('debug', 'info', 'warning', 'error')", name="level"),
     schema="ops",
 )
+
+# Migration 0007: indexes for lookups by run, by source and by raw file
+
+Index("ix_run_source_id_started_at", run.c.source_id, run.c.started_at)
+Index("ix_run_started_at", run.c.started_at)
+Index("ix_fetch_log_run_id", fetch_log.c.run_id)
+Index("ix_fetch_log_raw_sha256", fetch_log.c.raw_sha256)
+Index("ix_rejects_run_id", rejects.c.run_id)
+Index("ix_check_result_run_id", check_result.c.run_id)
+Index("ix_records_raw_sha256", records.c.raw_sha256)
+Index("ix_record_versions_raw_sha256", record_versions.c.raw_sha256)

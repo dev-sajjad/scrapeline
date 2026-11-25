@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<nav aria-label="Breadcrumb"><a href="/marts">Marts</a></nav>
+<h1>{{ title }}</h1>
+{% if kind == "missing" %}
+<p class="empty">No warehouse yet at <span class="mono">{{ path }}</span>.</p>
+<p>The marts are built by dbt from the Parquet lake. Build them with:</p>
+<pre>make lake &amp;&amp; make dbt</pre>
+{% elif kind == "incomplete" %}
+<p class="empty">The warehouse at <span class="mono">{{ path }}</span> does not contain this mart yet.</p>
+<p>Rebuild it with <code>make dbt</code>. The warehouse said: {{ detail }}</p>
+{% else %}
+<section class="error">
+  <p>The warehouse at <span class="mono">{{ path }}</span> could not be read.</p>
+  <p>If dbt is building it right now, try again in a moment; otherwise rebuild it with
+  <code>make dbt</code>.</p>
+  <p class="muted">The warehouse said: {{ detail }}</p>
+</section>
+{% endif %}
+{% endblock %}

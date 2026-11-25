@@ -1,0 +1,354 @@
+:root {
+  --bg: #f3f4f2;
+  --surface: #ffffff;
+  --surface-2: #f7f8f6;
+  --text: #1c201e;
+  --muted: #5d6661;
+  --border: #dde1de;
+  --border-strong: #c5ccc8;
+  --accent: #1c5a8a;
+  --ok: #22744a;
+  --ok-bg: #e5f2ea;
+  --warn: #8a5800;
+  --warn-bg: #faefd8;
+  --bad: #b0261e;
+  --bad-bg: #fbe8e6;
+  --info: #3b5675;
+  --info-bg: #e8eef5;
+  --neutral-bg: #eceeec;
+  --focus: #1c5a8a;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --radius: 6px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #131615;
+    --surface: #1a1e1c;
+    --surface-2: #1f2421;
+    --text: #e1e6e3;
+    --muted: #96a19b;
+    --border: #2b312e;
+    --border-strong: #3b4440;
+    --accent: #7fb3dd;
+    --ok: #6cc497;
+    --ok-bg: #17291f;
+    --warn: #e3b04e;
+    --warn-bg: #2c2515;
+    --bad: #ff8b80;
+    --bad-bg: #351c1a;
+    --info: #9db7d6;
+    --info-bg: #1c2633;
+    --neutral-bg: #252a27;
+    --focus: #7fb3dd;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 var(--sans);
+  font-variant-numeric: tabular-nums;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+a:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+code, pre, .mono { font-family: var(--mono); font-size: 12.5px; }
+.muted { color: var(--muted); }
+.nowrap { white-space: nowrap; }
+
+.skip {
+  position: absolute;
+  left: -9999px;
+  top: 8px;
+  background: var(--surface);
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  z-index: 10;
+}
+.skip:focus { left: 8px; }
+
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 28px;
+  align-items: center;
+  padding: 10px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.brand { font-weight: 700; color: var(--text); letter-spacing: -0.01em; }
+.topbar nav { display: flex; flex-wrap: wrap; gap: 2px 4px; }
+.topbar nav a {
+  color: var(--muted);
+  white-space: nowrap;
+  padding: 3px 8px;
+  border-radius: var(--radius);
+}
+.topbar nav a:hover { color: var(--text); background: var(--surface-2); text-decoration: none; }
+.topbar nav a[aria-current="page"] { color: var(--text); font-weight: 600; background: var(--neutral-bg); }
+
+main { max-width: 1280px; margin: 0 auto; padding: 20px 24px 32px; }
+h1 { font-size: 20px; line-height: 1.3; margin: 0; letter-spacing: -0.01em; }
+h2 { font-size: 15px; margin: 28px 0 10px; }
+h2 .count { color: var(--muted); font-weight: 400; }
+h3 { font-size: 14px; margin: 20px 0 8px; }
+h1 .mono { font-size: 0.9em; }
+main > h1 { margin-bottom: 8px; }
+p { margin: 0 0 10px; overflow-wrap: break-word; }  /* long paths and URLs in prose */
+details > summary { cursor: pointer; }
+main > details { margin: 0 0 12px; }
+
+.page-head { margin-bottom: 16px; }
+.page-head .lede { color: var(--muted); margin: 4px 0 0; }
+.page-head .lede .badge { vertical-align: 1px; }
+.page-head + .panels > section > h2:first-child { margin-top: 8px; }
+.crumbs, main > nav[aria-label="Breadcrumb"] { color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 28px 0 10px; }
+.section-head h2 { margin: 0; }
+.section-head a { font-size: 13px; white-space: nowrap; }
+
+/* The health verdict: the one place the panel raises its voice. */
+.verdict {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 5px solid var(--ok);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  margin-bottom: 20px;
+}
+.verdict h1 { margin-bottom: 4px; }
+.verdict p { margin: 0; font-size: 15px; }
+.verdict-ok { border-left-color: var(--ok); }
+.verdict-attention { border-left-color: var(--warn); }
+.verdict-bad { border-left-color: var(--bad); }
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin: 0 0 12px;
+}
+.stats > div {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  min-width: 0;
+}
+.stats dt { color: var(--muted); font-size: 12.5px; }
+.stats dd { margin: 2px 0 0; font-size: 20px; font-weight: 600; line-height: 1.3; }
+.stats dd small { display: block; font-size: 12.5px; font-weight: 400; color: var(--muted); }
+.stats .is-bad dd { color: var(--bad); }
+.stats .is-warn dd { color: var(--warn); }
+
+.panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 0 24px; }
+
+.kv {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) 1fr;
+  gap: 0;
+  margin: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.kv > div { display: contents; }
+.kv dt, .kv dd { padding: 6px 12px; border-bottom: 1px solid var(--border); min-width: 0; }
+.kv > div:last-child dt, .kv > div:last-child dd { border-bottom: 0; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+
+.table-wrap {
+  overflow-x: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+tbody tr:last-child th, tbody tr:last-child td { border-bottom: 0; }
+thead th {
+  background: var(--surface-2);
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+tbody tr:hover { background: var(--surface-2); }
+tbody th { font-weight: 600; font-size: inherit; color: var(--text); }
+tbody th .muted, tbody th .plain, tbody th .empty { font-weight: 400; }
+td.num, th.num { text-align: right; }
+td.wrap { overflow-wrap: anywhere; min-width: 16ch; }
+td.url { overflow-wrap: anywhere; min-width: 24ch; max-width: 52ch; }
+tr.flagged > :first-child { box-shadow: inset 3px 0 0 var(--bad); }
+.table-note { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+/* Tables written without a .table-wrap get the same surface; narrow screens scroll them. */
+table:not(.table-wrap > table) { background: var(--surface); border: 1px solid var(--border); margin: 0 0 12px; }
+caption { caption-side: top; text-align: left; padding: 0 0 6px; font-size: 13px; }
+td ul { margin: 4px 0 0; padding-left: 18px; }
+del { color: var(--bad); }
+ins { color: var(--ok); text-decoration: none; }
+del a, ins a { color: inherit; }
+
+/* The live feed table comes from the live macros; its .table-wrap scrolls it on phones. */
+.live-status { color: var(--muted); font-size: 13px; }
+.live-status p { margin: 0 0 6px; }
+table.events time { white-space: nowrap; }
+table.events summary { color: var(--accent); font-size: 13px; width: max-content; }
+table.events pre { margin: 6px 0 0; max-width: 60ch; max-height: 320px; overflow: auto; }
+/* Until the stream sends a row the table body is blank, or holds only whitespace. Without
+   JavaScript nothing will arrive, so the empty table is hidden instead. */
+@media (scripting: enabled) {
+  table.events:not(:has(tbody tr))::after {
+    content: "Waiting for events…";
+    display: table-caption;
+    caption-side: bottom;
+    padding: 8px 10px;
+    color: var(--muted);
+  }
+}
+@media (scripting: none) {
+  table.events:not(:has(tbody tr)) { display: none; }
+}
+
+.badge {
+  display: inline-block;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+  background: var(--neutral-bg);
+  color: var(--muted);
+}
+.badge-active, .badge-succeeded, .badge-pass, .badge-ok, .badge-done, .badge-closed,
+.badge-insert, .badge-restored { background: var(--ok-bg); color: var(--ok); }
+.badge-draft, .badge-running, .badge-warn, .badge-warning, .badge-ack, .badge-queued,
+.badge-overdue, .badge-update, .badge-stalled, .badge-not-synced { background: var(--warn-bg); color: var(--warn); }
+.badge-broken, .badge-failed, .badge-fail, .badge-open, .badge-error, .badge-dead,
+.badge-removed, .badge-unreviewed { background: var(--bad-bg); color: var(--bad); }
+.badge-human, .badge-rule, .badge-evidence, .badge-llm { background: var(--info-bg); color: var(--info); }
+/* Routine event levels stay quiet so warnings and errors stand out in the live feed. */
+.badge-retired, .badge-none, .badge-info { background: var(--neutral-bg); color: var(--muted); }
+.badge-debug { background: transparent; color: var(--muted); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.flags { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+
+/* An empty state is a dashed box; .empty inside text or a table cell is only muted. */
+.empty { color: var(--muted); }
+p.empty {
+  background: var(--surface);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin: 0 0 12px;
+}
+.empty code { color: var(--text); }
+.notice, p[role="alert"] {
+  background: var(--warn-bg);
+  color: var(--text);
+  border-left: 4px solid var(--warn);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  margin: 0 0 12px;
+}
+.notice-bad, p[role="alert"] { background: var(--bad-bg); border-left-color: var(--bad); }
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: flex-end;
+  margin: 0 0 14px;
+}
+.field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.field label { font-size: 12.5px; color: var(--muted); }
+.field-actions { flex-direction: row; align-items: center; gap: 12px; }
+/* GET filter forms written as plain label and control pairs. */
+main form:not(.filters), .filters > p {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  align-items: center;
+  margin: 0 0 14px;
+}
+.filters > p { margin: 0; }
+main form:not(.filters) label, .filters > p label { color: var(--muted); font-size: 12.5px; }
+main form:not(.filters) label:not(:first-child), .filters > p label:not(:first-child) { margin-left: 6px; }
+select, input[type="search"], input[type="text"], input:not([type]), button {
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 5px 8px;
+  min-height: 32px;
+}
+input[type="search"], input[type="text"], input:not([type]) { min-width: 14ch; }
+button { cursor: pointer; background: var(--surface-2); font-weight: 600; padding: 5px 14px; }
+button:hover { border-color: var(--muted); }
+
+.pager { display: flex; gap: 16px; align-items: center; margin: 10px 0 0; color: var(--muted); font-size: 13px; }
+
+details.json { margin: 0; }
+details.json summary { cursor: pointer; color: var(--accent); font-size: 13px; width: max-content; }
+details.json pre { margin: 8px 0 0; max-height: 480px; overflow: auto; }
+pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+td details.json pre { max-width: 60ch; }
+
+.price-chart svg { display: block; max-width: 960px; height: auto; }
+.price-chart p { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+
+.error h1 { color: var(--bad); margin-bottom: 8px; }
+.footer { max-width: 1280px; margin: 0 auto; padding: 0 24px 24px; color: var(--muted); font-size: 12px; }
+
+@media (max-width: 640px) {
+  body { font-size: 14px; }
+  .topbar { padding: 8px 12px; gap: 4px 12px; }
+  .topbar nav a { padding: 3px 6px; }
+  main { padding: 16px 12px 24px; }
+  .footer { padding: 0 12px 16px; }
+  .kv { grid-template-columns: 1fr; }
+  .kv dt { border-bottom: 0; padding-bottom: 0; font-size: 12.5px; }
+  .kv dd { padding-top: 2px; }
+  .panels { grid-template-columns: 1fr; }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .filters .field { flex: 1 1 140px; }
+  .filters select, .filters input[type="search"] { width: 100%; }
+  td.url { max-width: none; }
+  table:not(.table-wrap > table) { display: block; overflow-x: auto; }
+  /* Wide enough that messages wrap at words, not after every word; the feed scrolls. */
+  table.events { min-width: 600px; }
+  /* Each label above its control, so a label never ends a line apart from it. */
+  main form:not(.filters) label, .filters > p label,
+  main form:not(.filters) label:not(:first-child), .filters > p label:not(:first-child) {
+    flex-basis: 100%;
+    margin: 4px 0 -4px;
+  }
+  main form:not(.filters) :is(select, input), .filters > p :is(select, input) { flex: 1 1 100%; width: 100%; }
+  /* The chart scales down to the screen, so its tick labels are scaled back up. Larger
+     price labels outgrow the chart's left margin; they draw into a gutter instead. */
+  .price-chart .ticks { font-size: 30px; }
+  .price-chart svg { overflow: visible; padding-left: 40px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { scroll-behavior: auto !important; transition: none !important; }
+}

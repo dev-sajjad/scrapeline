@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% from "_macros.html" import empty %}
+{% block content %}
+<nav aria-label="Breadcrumb"><a href="/marts">Marts</a> / scraper health</nav>
+<h1>Scraper health</h1>
+<p>Per source per day from the <code>scraper_health_daily</code> mart: the last {{ window }} days of data{% if last_day %}, up to {{ last_day }}{% endif %}.
+Runs count on the day they started.</p>
+
+<form method="get" action="/marts/scraper-health" aria-label="Filter by source">
+  <label for="source_id">Source</label>
+  <select id="source_id" name="source_id">
+    <option value="">All sources</option>
+    {% for option in sources %}
+    <option value="{{ option }}"{% if option == filters.source_id %} selected{% endif %}>{{ option }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit">Filter</button>
+  <a href="/marts/scraper-health">Reset</a>
+</form>
+
+{% if totals %}
+<h2>Totals for the period</h2>
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th scope="col">Source</th>
+      <th scope="col" class="num">Runs</th>
+      <th scope="col" class="num">Success</th>
+      <th scope="col" class="num">Loaded</th>
+      <th scope="col" class="num">Updated</th>
+      <th scope="col" class="num">Removed</th>
+      <th scope="col" class="num">Rejects</th>
+      <th scope="col" class="num">Fetch errors</th>
+      <th scope="col" class="num">Blocked</th>
+      <th scope="col" class="num">Worst p95</th>
+      <th scope="col" class="num">Agent cost</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in totals %}
+    <tr>
+      <th scope="row"><a href="/sources/{{ row.source_id }}">{{ row.source_id }}</a></th>
+      <td class="num">{{ row.runs | number }}</td>
+      <td class="num">{{ row.success_rate | percent }}</td>
+      <td class="num">{{ row.records_loaded | number }}</td>
+      <td class="num">{{ row.records_updated | number }}</td>
+      <td class="num">{{ row.records_removed | number }}</td>
+      <td class="num">{{ row.rejects | number }}</td>
+      <td class="num">{{ row.fetch_errors | number }}</td>
+      <td class="num">{{ row.blocked_responses | number }}</td>
+      <td class="num">{{ row.worst_p95_fetch_ms | ms }}</td>
+      <td class="num">${{ "%.2f" | format(row.agent_cost_usd or 0) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+<h2>By day</h2>
+{% if days %}
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th scope="col">Day</th>
+      <th scope="col">Source</th>
+      <th scope="col" class="num">Runs</th>
+      <th scope="col" class="num">Success</th>
+      <th scope="col" class="num">Loaded</th>
+      <th scope="col" class="num">Updated</th>
+      <th scope="col" class="num">Removed</th>
+      <th scope="col" class="num">Rejects</th>
+      <th scope="col" class="num">Fetch errors</th>
+      <th scope="col" class="num">Blocked</th>
+      <th scope="col" class="num">p95 fetch</th>
+      <th scope="col" class="num">Agent cost</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in days %}
+    <tr>
+      <th scope="row">{{ row.date_day }}</th>
+      <td>{{ row.source_id }}</td>
+      <td class="num">{{ row.runs | number }}</td>
+      <td class="num">{{ row.success_rate | percent }}</td>
+      <td class="num">{{ row.records_loaded | number }}</td>
+      <td class="num">{{ row.records_updated | number }}</td>
+      <td class="num">{{ row.records_removed | number }}</td>
+      <td class="num">{{ row.rejects | number }}</td>
+      <td class="num">{{ row.fetch_errors | number }}</td>
+      <td class="num">{{ row.blocked_responses | number }}</td>
+      <td class="num">{{ row.p95_fetch_ms | ms }}</td>
+      <td class="num">${{ "%.2f" | format(row.agent_cost_usd or 0) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+{{ empty("No health data yet. It appears once sources have run and the lake and dbt have been rebuilt.") }}
+{% endif %}
+{% endblock %}

@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge, empty, reltime %}
+{% from "sources/_parts.html" import attention_flags, last_run_cell %}
+{% from "incidents/_table.html" import incidents_table %}
+{% from "live/_macros.html" import live_feed %}
+{% block content %}
+<section class="verdict verdict-{{ state }}">
+  <h1>Health</h1>
+  {% if state == "ok" %}
+  <p>All clear: no failing or overdue sources, no stalled jobs, no jobs failed in the last {{ failed_hours }} hours, no open incidents.</p>
+  {% else %}
+  <p>{{ problems | join(", ") }}.</p>
+  {% endif %}
+</section>
+
+<dl class="stats" aria-label="Platform summary">
+  <div><dt>Sources</dt><dd>{{ total_sources | number }}<small>{% for status, n in by_status if n %}{{ n }} {{ status }}{% if not loop.last %}, {% endif %}{% else %}none registered{% endfor %}</small></dd></div>
+  <div{% if flagged %} class="is-bad"{% endif %}><dt>Need attention</dt><dd>{{ flagged | number }}<small>failed last run or overdue</small></dd></div>
+  <div><dt>Jobs queued</dt><dd>{{ queue.queued | number }}<small>{% if queue.oldest_queued %}oldest {{ reltime(queue.oldest_queued) }}{% else %}queue empty{% endif %}</small></dd></div>
+  <div><dt>Jobs running</dt><dd>{{ queue.running | number }}<small>claimed by a worker</small></dd></div>
+  <div{% if queue.stalled %} class="is-warn"{% endif %}><dt>Stalled jobs</dt><dd>{{ queue.stalled | number }}<small>lease expired while running</small></dd></div>
+  <div{% if queue.failed %} class="is-bad"{% endif %}><dt>Failed jobs ({{ failed_hours }} h)</dt><dd>{{ queue.failed | number }}<small>out of retries; {{ queue.failed_total | number }} in all</small></dd></div>
+  <div{% if open_incidents %} class="is-bad"{% endif %}><dt>Open incidents</dt><dd>{{ open_incidents | number }}<small>open or acknowledged</small></dd></div>
+  <div><dt>Lake export</dt><dd>
+    {% if lake.error %}unreadable<small>{{ lake.error | short(80) }}</small>
+    {% elif lake.last_export %}{{ reltime(lake.last_export) }}<small>{{ lake.exported }} of {{ lake.tables }} tables, {{ lake.rows | number }} rows</small>
+    {% else %}never<small>export with <code>make lake</code></small>{% endif %}
+  </dd></div>
+</dl>
+
+<div class="section-head">
+  <h2>Sources <span class="count">by last run</span></h2>
+  <a href="/sources">All {{ total_sources | number }} sources</a>
+</div>
+{% if sources %}
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th scope="col">Source</th>
+      <th scope="col">Status</th>
+      <th scope="col">Cadence</th>
+      <th scope="col">Last run</th>
+      <th scope="col" class="num">Loaded in last run</th>
+      <th scope="col" class="num">Open incidents</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in sources %}
+    <tr{% if row.attention %} class="flagged"{% endif %}>
+      <th scope="row" class="wrap"><a href="/sources/{{ row.id | urlencode }}">{{ row.id }}</a> <span class="muted">{{ row.name }}</span></th>
+      <td>{{ badge(row.status) }} {{ attention_flags(row.attention) }}</td>
+      <td>{{ row.cadence }}</td>
+      <td class="nowrap">{{ last_run_cell(row.last_run) }}</td>
+      <td class="num">{% if row.last_run %}{{ row.last_run.loaded | number }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num">{% if row.open_incidents %}<a href="/incidents?source_id={{ row.id | urlencode }}">{{ row.open_incidents | number }}</a>{% else %}0{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% if sources | length < total_sources %}
+<p class="table-note">Showing {{ sources | length }} of {{ total_sources | number }} sources, those needing attention first.{% if not checked_all %} Only the first {{ sources_checked | number }} sources by id were checked.{% endif %}</p>
+{% endif %}
+{% else %}
+<p class="empty">No sources registered yet. Add YAML files under <code>config/sources/</code> and run <code>scrapeline source sync</code>, or try the demo with <code>make demo-history</code>.</p>
+{% endif %}
+
+<div class="section-head">
+  <h2>Open incidents</h2>
+  <a href="/incidents">All incidents</a>
+</div>
+{% if incidents %}
+{{ incidents_table(incidents, show_run=false) }}
+{% if open_incidents > incidents | length %}
+<p class="table-note">The {{ incidents | length }} newest of {{ open_incidents | number }} open incidents.</p>
+{% endif %}
+{% else %}
+{{ empty("No open incidents.") }}
+{% endif %}
+
+<h2>Recent activity</h2>
+{{ live_feed() }}
+{% endblock %}

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge, empty, pager, reltime, filter_form, select_field, text_field %}
+{% from "sources/_parts.html" import attention_flags, last_run_cell %}
+{% block content %}
+<div class="page-head">
+  <h1>Sources</h1>
+  <p class="lede">Every registered source, its last run and what it has stored.</p>
+</div>
+
+{% call filter_form("/sources", "Filter sources") %}
+  {{ text_field("q", "Id or name", filters.q, "e.g. shop") }}
+  {{ select_field("status", "Status", status_choices, filters.status) }}
+  {{ select_field("dataset", "Dataset", dataset_choices, filters.dataset) }}
+{% endcall %}
+
+<div id="results">
+{% if rows %}
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th scope="col">Source</th>
+      <th scope="col">Dataset</th>
+      <th scope="col">Site</th>
+      <th scope="col">Status</th>
+      <th scope="col">Cadence</th>
+      <th scope="col">Last run</th>
+      <th scope="col" class="num">Records</th>
+      <th scope="col" class="num">Open incidents</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr{% if row.attention %} class="flagged"{% endif %}>
+      <th scope="row" class="wrap">
+        <a href="/sources/{{ row.id | urlencode }}">{{ row.id }}</a>
+        <div class="muted">{{ row.name }}</div>
+      </th>
+      <td>{% if row.dataset %}<a href="/data/{{ row.dataset | urlencode }}">{{ row.dataset }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td>
+        {% if row.host %}
+        <a href="/sites/{{ row.host | urlencode }}">{{ row.host }}</a>
+        <div class="muted">{{ row.category_label or row.category }}</div>
+        {% else %}<span class="muted">—</span>{% endif %}
+      </td>
+      <td>{{ badge(row.status) }} {{ attention_flags(row.attention) }}</td>
+      <td>{{ row.cadence }}</td>
+      <td>{{ last_run_cell(row.last_run) }}</td>
+      <td class="num">{{ row.records | number }}</td>
+      <td class="num">{% if row.open_incidents %}<a href="/incidents?source_id={{ row.id | urlencode }}">{{ row.open_incidents | number }}</a>{% else %}0{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{{ pager(request, page, total) }}
+{% elif filtered %}
+{{ empty("No sources match these filters.") }}
+{% else %}
+<p class="empty">No sources registered yet. Add YAML files under <code>config/sources/</code> and run <code>scrapeline source sync</code>, or compile an instruction with <code>scrapeline instruction apply</code>.</p>
+{% endif %}
+</div>
+{% endblock %}

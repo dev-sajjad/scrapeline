@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% from "_macros.html" import empty, pager, filter_form, select_field %}
+{% from "incidents/_table.html" import incidents_table %}
+{% block content %}
+<div class="page-head">
+  <h1>Incidents</h1>
+  <p class="lede">Problems the pipeline opened: drift, blocked fetches, failed quality checks, exhausted repairs.</p>
+</div>
+
+{% call filter_form("/incidents", "Filter incidents") %}
+  {{ select_field("status", "Status", status_choices, filters.status, "open or acknowledged") }}
+  {{ select_field("source_id", "Source", source_choices, filters.source_id) }}
+  {{ select_field("kind", "Kind", kind_choices, filters.kind) }}
+{% endcall %}
+
+<div id="results">
+{% if incidents %}
+{{ incidents_table(incidents) }}
+{{ pager(request, page, total) }}
+{% elif filtered %}
+{{ empty("No incidents match these filters.") }}
+{% else %}
+{{ empty("No open incidents. Closed ones are listed under status: closed or all.") }}
+{% endif %}
+</div>
+{% endblock %}

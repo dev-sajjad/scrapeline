@@ -19,3 +19,9 @@ Operators need one place to see health, sources, sites, runs, data, lineage and 
 
 ## Consequences
 One image and one language for the whole platform. Highly interactive views stay modest by design; a separate frontend can be added later behind the same JSON API.
+
+## Implementation notes (2026-11-25)
+- **Live events.** Each panel process holds one `LISTEN` connection and fans notifications out to its open streams through bounded queues. A slow browser is dropped and reconnects rather than slowing the others. A new stream replays the latest 50 matching events. A reconnecting browser sends `Last-Event-ID` and gets only what it missed, up to 500 events; beyond that the stream starts over. If the listening connection drops, the hub reconnects with backoff and catches up from `ops.event`, so no committed event is lost.
+- **Scraped content stays inert.** Templates autoescape everything. Raw responses are previewed as escaped text and downloaded only as attachments, never rendered on the panel's origin. The content security policy allows scripts and styles from `/static` only.
+- **Bound to this machine.** The compose service publishes on `127.0.0.1` and the app refuses other `Host` headers, which blocks DNS rebinding. Login, CSRF protection and the audit trail arrive with the first write actions.
+- **Analytics are read in place.** Marts are read from the dbt DuckDB file in read-only mode, one short connection per request; a missing, locked or outdated warehouse gives a page that says what to run.
