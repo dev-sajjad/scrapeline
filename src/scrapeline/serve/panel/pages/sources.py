@@ -129,15 +129,20 @@ def open_incident_counts(conn: Connection, source_ids: Collection[str]) -> dict[
 
 
 def source_overview(
-    conn: Connection, sources: Sequence[Mapping[Any, Any]], now: datetime
+    conn: Connection,
+    sources: Sequence[Mapping[Any, Any]],
+    now: datetime,
+    *,
+    with_counts: bool = True,
 ) -> list[dict[str, Any]]:
-    """Source rows joined with their last run, record count, open incidents and flags."""
+    """Source rows joined with their last run, record count, open incidents and flags.
+
+    Counting records scans every current record of the sources, so pages that do not show
+    the count pass `with_counts=False` and get None.
+    """
     ids = [row["id"] for row in sources]
-    runs, counts, incidents = (
-        last_runs(conn, ids),
-        record_counts(conn, ids),
-        open_incident_counts(conn, ids),
-    )
+    runs, incidents = last_runs(conn, ids), open_incident_counts(conn, ids)
+    counts = record_counts(conn, ids) if with_counts else None
     rows = []
     for source in sources:
         cadence = source.get("cadence") or DEFAULT_CADENCE
@@ -147,7 +152,7 @@ def source_overview(
                 **source,
                 "cadence": cadence,
                 "last_run": last,
-                "records": counts.get(source["id"], 0),
+                "records": counts.get(source["id"], 0) if counts is not None else None,
                 "open_incidents": incidents.get(source["id"], 0),
                 "attention": attention(
                     source["status"],

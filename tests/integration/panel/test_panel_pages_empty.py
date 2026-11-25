@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 from selectolax.lexbor import LexborHTMLParser as HTMLParser
 from selectolax.lexbor import LexborNode as Node
-from sqlalchemy import Connection, Engine
+from sqlalchemy import Connection, Engine, event
 
 from scrapeline.serve.panel.app import create_app
 from scrapeline.store import tables as t
@@ -229,6 +229,29 @@ def test_health_counts_stalled_and_failed_jobs(client: TestClient, clean_db: Eng
     assert "1 stalled job, 1 failed job in the last 24 h." in page
     assert "verdict-bad" in page
     assert failed_jobs_tile(page) == "1 out of retries; 2 in all"
+
+
+def test_health_does_not_count_records(client: TestClient, clean_db: Engine) -> None:
+    """Health shows no record counts, so it must not pay for scanning the records."""
+    with clean_db.begin() as conn:
+        add_source(conn, "counted")
+        add_run(conn, "counted")
+
+    def statements_for(path: str) -> list[str]:
+        seen: list[str] = []
+
+        def remember(conn: Any, cursor: Any, statement: str, *args: Any) -> None:
+            seen.append(statement)
+
+        event.listen(clean_db, "before_cursor_execute", remember)
+        try:
+            assert client.get(path).status_code == 200
+        finally:
+            event.remove(clean_db, "before_cursor_execute", remember)
+        return seen
+
+    assert not any("data.records" in sql for sql in statements_for("/"))
+    assert any("data.records" in sql for sql in statements_for("/sources"))  # shown there
 
 
 def test_jobs_that_died_days_ago_leave_health_clear(client: TestClient, clean_db: Engine) -> None:

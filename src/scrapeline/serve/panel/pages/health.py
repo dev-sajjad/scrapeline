@@ -122,7 +122,7 @@ def health(request: Request, engine: EngineDep, settings: SettingsDep) -> HTMLRe
             .order_by(s.c.id)
             .limit(SOURCES_CHECKED)
         ).mappings()
-        overview = source_overview(conn, list(checked), datetime.now(UTC))
+        overview = source_overview(conn, list(checked), datetime.now(UTC), with_counts=False)
         open_incidents = conn.execute(
             select(func.count()).select_from(i).where(i.c.status.in_(OPEN_INCIDENT))
         ).scalar_one()
