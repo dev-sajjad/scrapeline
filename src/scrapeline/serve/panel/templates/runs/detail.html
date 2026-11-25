@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge, empty, reltime, ext_link, raw_link, json_block %}
+{% from "incidents/_table.html" import incidents_table %}
+{% from "live/_macros.html" import live_feed %}
+{% block content %}
+<div class="page-head">
+  <div class="crumbs"><a href="/runs">Runs</a> / <a href="/sources/{{ run.source_id | urlencode }}">{{ run.source_id }}</a></div>
+  <h1>Run <span class="mono">{{ run.id | short(8) }}</span></h1>
+  <p class="lede">{{ badge(run.status) }} {{ run.kind }} run of <a href="/sources/{{ run.source_id | urlencode }}">{{ run.source_id }}</a>, started {{ reltime(run.started_at) }}</p>
+</div>
+
+{% if run.error %}
+<p class="notice notice-bad"><strong>Error:</strong> <span class="mono">{{ run.error }}</span></p>
+{% endif %}
+
+<div class="panels">
+<section aria-labelledby="h-summary">
+  <h2 id="h-summary">Summary</h2>
+  <dl class="kv">
+    <div><dt>Run id</dt><dd class="mono">{{ run.id }}</dd></div>
+    <div><dt>Status</dt><dd>{{ badge(run.status) }}</dd></div>
+    <div><dt>Kind</dt><dd>{{ run.kind }}</dd></div>
+    <div><dt>Started</dt><dd>{{ run.started_at | dt }}</dd></div>
+    <div><dt>Finished</dt><dd>{% if run.finished_at %}{{ run.finished_at | dt }}{% else %}<span class="muted">still running</span>{% endif %}</dd></div>
+    <div><dt>Duration</dt><dd>{{ run.started_at | duration(run.finished_at) }}</dd></div>
+    <div><dt>Window</dt><dd>{% if run.since or run.until %}{{ run.since | dt }} to {{ run.until | dt }}{% else %}<span class="muted">none (everything listed)</span>{% endif %}</dd></div>
+    <div><dt>Scraper version</dt><dd>{% if run.scraper_version_id %}{{ run.scraper_version_id }} <span class="mono muted">{{ run.adapter }}</span> <span class="mono" title="{{ run.code_hash }}">{{ run.code_hash | short(10) }}</span> <span class="muted">by {{ run.author }}</span>{% else %}—{% endif %}</dd></div>
+  </dl>
+</section>
+
+<section aria-labelledby="h-outcome">
+  <h2 id="h-outcome">Outcome</h2>
+  <dl class="kv">
+    <div><dt>Pages</dt><dd>{{ stats.pages | number }}</dd></div>
+    <div><dt>Records parsed</dt><dd>{% if stats.records %}{% for name, n in stats.records.items() %}{{ name }} {{ n | number }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}—{% endif %}</dd></div>
+    <div><dt>Rejects</dt><dd>{{ stats.rejects | number }}</dd></div>
+    <div><dt>Removed</dt><dd>{{ stats.removed | number }}</dd></div>
+    <div><dt>Complete crawl</dt><dd>{% if stats.complete %}yes <span class="muted">removals were detected</span>{% else %}no <span class="muted">removals not checked</span>{% endif %}</dd></div>
+    <div><dt>Truncated</dt><dd>{% if stats.truncated %}{{ badge("yes", "warn") }} <span class="muted">page limit reached</span>{% else %}no{% endif %}</dd></div>
+    <div><dt>Watermark</dt><dd>{{ stats.watermark or "—" }}</dd></div>
+  </dl>
+</section>
+</div>
+
+<h2>Loaded</h2>
+{% if loaded %}
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th scope="col">Dataset</th>
+      <th scope="col" class="num">Inserted</th>
+      <th scope="col" class="num">Updated</th>
+      <th scope="col" class="num">Unchanged</th>
+      <th scope="col" class="num">Restored</th>
+      <th scope="col" class="num">Removed</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in loaded %}
+    <tr>
+      <th scope="row">{{ row.dataset }}</th>
+      <td class="num">{{ row.inserted | number }}</td>
+      <td class="num">{{ row.updated | number }}</td>
+      <td class="num">{{ row.unchanged | number }}</td>
+      <td class="num">{{ row.restored | number }}</td>
+      <td class="num">{{ row.removed | number }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+{{ empty("Nothing was loaded by this run.") }}
+{% endif %}
+
+<h2>Quality checks</h2>
+{% if checks %}
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th scope="col">Check</th>
+      <th scope="col">Status</th>
+      <th scope="col" class="num">Value</th>
+      <th scope="col">Threshold</th>
+      <th scope="col">Details</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for check in checks %}
+    <tr{% if check.status == "fail" %} class="flagged"{% endif %}>
+      <th scope="row" class="mono">{{ check.check_name }}</th>
+      <td>{{ badge(check.status) }}</td>
+      <td class="num">{{ check.value | number }}</td>
+      <td class="mono">{{ check.threshold or "—" }}</td>
+      <td class="mono wrap">{% if check.details %}{{ check.details | json }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+{{ empty("No quality checks ran; checks run after records are parsed.") }}
+{% endif %}
+
+<h2>Rejects <span class="count">{{ rejects_total | number }}</span></h2>
+{% if rejects %}
+<div class="table-wrap">
+<table>
+  <thead><tr><th scope="col">Type</th><th scope="col">Reason</th><th scope="col">Raw</th><th scope="col">Record</th></tr></thead>
+  <tbody>
+    {% for reject in rejects %}
+    <tr>
+      <th scope="row">{{ reject.record_type }}</th>
+      <td class="wrap">{{ reject.reason }}</td>
+      <td>{{ raw_link(reject.raw_sha256) }}</td>
+      <td>{{ json_block(reject.record, "Show record") }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% if rejects_total > rejects | length %}
+<p class="table-note">The first {{ rejects | length }} of {{ rejects_total | number }} rejects.</p>
+{% endif %}
+{% else %}
+{{ empty("No records were rejected in this run.") }}
+{% endif %}
+
+<h2>Fetch log <span class="count">{{ fetches_total | number }}</span></h2>
+{% if fetches %}
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th scope="col">URL</th>
+      <th scope="col" class="num">Status</th>
+      <th scope="col" class="num">Elapsed</th>
+      <th scope="col" class="num">Size</th>
+      <th scope="col">Kind</th>
+      <th scope="col">Error</th>
+      <th scope="col">Raw</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for fetch in fetches %}
+    <tr{% if fetch.error or (fetch.status and fetch.status >= 400) %} class="flagged"{% endif %}>
+      <td class="url mono">{{ ext_link(fetch.url) }}{% if fetch.final_url and fetch.final_url != fetch.url %}<div class="muted">redirected to {{ ext_link(fetch.final_url) }}</div>{% endif %}</td>
+      <td class="num">{{ fetch.status or "—" }}</td>
+      <td class="num nowrap">{{ fetch.elapsed_ms | ms }}</td>
+      <td class="num nowrap">{{ fetch.nbytes | bytes }}</td>
+      <td>{{ fetch.kind or "—" }}</td>
+      <td class="wrap">{% if fetch.error %}<span title="{{ fetch.error }}">{{ fetch.error | short(90) }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td>{{ raw_link(fetch.raw_sha256) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% if fetches_total > fetches | length %}
+<p class="table-note">The first {{ fetches | length }} of {{ fetches_total | number }} fetches; {{ (fetches_total - fetches | length) | number }} more are not shown.</p>
+{% endif %}
+{% else %}
+{{ empty("No fetches were logged for this run.") }}
+{% endif %}
+
+<h2>Incidents</h2>
+{% if incidents %}
+{{ incidents_table(incidents, show_source=false, show_run=false) }}
+{% else %}
+{{ empty("This run opened or repeated no incident.") }}
+{% endif %}
+
+<h2>Run log</h2>
+{{ live_feed(run_id=run.id) }}
+{% endblock %}

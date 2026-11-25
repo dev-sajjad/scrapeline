@@ -1,11 +1,69 @@
 {# Small building blocks shared by every page. #}
 
-{% macro badge(value) -%}
-<span class="badge badge-{{ value | lower | replace(' ', '-') }}">{{ value }}</span>
+{# A status pill. `tone` picks the colour when the value itself is not a known status. #}
+{% macro badge(value, tone=none) -%}
+<span class="badge badge-{{ (tone or value) | lower | replace(' ', '-') }}">{{ value }}</span>
 {%- endmacro %}
 
 {% macro empty(message) -%}
 <p class="empty">{{ message }}</p>
+{%- endmacro %}
+
+{# Relative time for reading, the exact time on hover, ISO for machines. #}
+{% macro reltime(value) -%}
+{% if value is none %}<span class="muted">—</span>{% else %}<time datetime="{{ value | iso }}" title="{{ value | dt }}">{{ value | ago }}</time>{% endif %}
+{%- endmacro %}
+
+{# A link that leaves the panel. Anything but an http(s) URL is shown as plain text. #}
+{% macro ext_link(url, text=none) -%}
+{% set href = url | http_url %}
+{% if href %}<a class="ext" href="{{ href }}" rel="noopener noreferrer nofollow">{{ text or url }}</a>{% elif url %}{{ text or url }}{% else %}<span class="muted">—</span>{% endif %}
+{%- endmacro %}
+
+{# Link to a stored raw response by its SHA-256. #}
+{% macro raw_link(sha256) -%}
+{% if sha256 %}<a class="mono" href="/storage/raw/{{ sha256 | urlencode }}" title="{{ sha256 }}">{{ sha256 | short(10) }}</a>{% else %}<span class="muted">—</span>{% endif %}
+{%- endmacro %}
+
+{# Structured data (config, details) folded away until asked for. #}
+{% macro json_block(value, label="Show JSON", open=false) -%}
+<details class="json"{% if open %} open{% endif %}>
+  <summary>{{ label }}</summary>
+  <pre>{{ value | json(2) }}</pre>
+</details>
+{%- endmacro %}
+
+{# A GET filter form. htmx swaps only the results when it is available; without it the form
+   simply reloads the page. #}
+{% macro filter_form(action, label) -%}
+<form class="filters" method="get" action="{{ action }}" role="search" aria-label="{{ label }}"
+      hx-get="{{ action }}" hx-select="#results" hx-target="#results" hx-swap="outerHTML"
+      hx-push-url="true" hx-trigger="change, submit">
+  {{ caller() }}
+  <div class="field field-actions">
+    <button type="submit">Apply</button>
+    <a href="{{ action }}">Reset</a>
+  </div>
+</form>
+{%- endmacro %}
+
+{% macro select_field(name, label, options, current, any_label="Any") -%}
+<div class="field">
+  <label for="filter-{{ name }}">{{ label }}</label>
+  <select id="filter-{{ name }}" name="{{ name }}">
+    <option value="">{{ any_label }}</option>
+    {% for value, text in options %}
+    <option value="{{ value }}"{% if value == current %} selected{% endif %}>{{ text }}</option>
+    {% endfor %}
+  </select>
+</div>
+{%- endmacro %}
+
+{% macro text_field(name, label, current, placeholder="") -%}
+<div class="field">
+  <label for="filter-{{ name }}">{{ label }}</label>
+  <input id="filter-{{ name }}" name="{{ name }}" type="search" value="{{ current or '' }}" placeholder="{{ placeholder }}">
+</div>
 {%- endmacro %}
 
 {# Previous/next links that keep the current query string filters. #}
@@ -13,11 +71,11 @@
 {% if page.previous_offset is not none or page.has_next(total) %}
 <nav class="pager" aria-label="Pages">
   {% if page.previous_offset is not none %}
-  <a href="{{ request.url.include_query_params(offset=page.previous_offset) }}">← Previous</a>
+  <a href="{{ request.url.include_query_params(offset=page.previous_offset) }}" rel="prev">Previous</a>
   {% endif %}
   <span>{{ page.offset + 1 }}–{{ [page.offset + page.limit, total] | min }} of {{ total | number }}</span>
   {% if page.has_next(total) %}
-  <a href="{{ request.url.include_query_params(offset=page.offset + page.limit) }}">Next →</a>
+  <a href="{{ request.url.include_query_params(offset=page.offset + page.limit) }}" rel="next">Next</a>
   {% endif %}
 </nav>
 {% endif %}
