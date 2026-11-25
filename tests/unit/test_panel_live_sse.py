@@ -218,6 +218,9 @@ def test_status_is_escaped_html_for_each_situation() -> None:
     assert "No matching events yet" in empty
     assert "latest 1 event;" in stream_status(1, resumed=False)
     assert "caught up 3 missed events" in stream_status(3, resumed=True)
+    restarted = stream_status(50, resumed=True, restarted=True)
+    assert "missed more than 500 events" in restarted and "latest 50 events" in restarted
+    assert "caught up" not in restarted
 
 
 def test_live_feed_macro_builds_an_accessible_stream_url() -> None:

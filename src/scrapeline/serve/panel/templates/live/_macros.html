@@ -11,7 +11,8 @@
 
   The stream first sends `reset`, which empties the table, then replays the latest matching
   events and adds new ones on top as they happen. A browser that reconnects with
-  Last-Event-ID gets only what it missed, without a reset. `initial` is a list of
+  Last-Event-ID gets only what it missed, without a reset, unless it missed too many to
+  replay; then the stream starts over as on a first visit. `initial` is a list of
   (event, data as JSON) pairs, newest first, shown before the stream connects; without
   JavaScript it is all there is. Pages that pass no `initial` link to /live instead.
 #}
