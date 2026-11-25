@@ -11,18 +11,21 @@ Everything after the raw store can be rebuilt from it.</p>
   <div><dt>Size</dt><dd>{{ raw_totals.bytes | bytes }}</dd></div>
   <div><dt>Sources</dt><dd>{{ by_source | length | number }}</dd></div>
 </dl>
+<div class="table-wrap">
 <table>
   <tbody>
-    <tr><th scope="row">Root</th><td class="mono">{{ raw_root }}{% if not raw_root_exists %} <span class="empty">(not created yet)</span>{% endif %}</td></tr>
+    <tr><th scope="row">Root</th><td class="mono">{{ raw_root }}{% if not raw_root_exists %} <span class="muted">(not created yet)</span>{% endif %}</td></tr>
     <tr><th scope="row">Key layout</th><td class="mono">{{ key_layout }}</td></tr>
     <tr><th scope="row">Rules</th><td>Every response is stored once under its SHA-256 before parsing and is never modified.</td></tr>
   </tbody>
 </table>
+</div>
 
 {% if by_source %}
 <h3>By source</h3>
+<p>Objects and sizes count the raw files per source, from the fetch log. Bytes fetched again on another day are stored again under that day.</p>
+<div class="table-wrap">
 <table>
-  <caption class="empty">Objects and sizes count distinct raw files per source, from the fetch log.</caption>
   <thead>
     <tr>
       <th scope="col">Source</th>
@@ -44,10 +47,12 @@ Everything after the raw store can be rebuilt from it.</p>
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% endif %}
 
 {% if recent %}
 <h3>Latest raw files</h3>
+<div class="table-wrap">
 <table>
   <thead>
     <tr>
@@ -72,6 +77,7 @@ Everything after the raw store can be rebuilt from it.</p>
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% else %}
 {{ empty("Nothing fetched yet. Raw files appear here after the first run.") }}
 {% endif %}
@@ -80,6 +86,7 @@ Everything after the raw store can be rebuilt from it.</p>
 <p>PostgreSQL tables by schema, {{ db_bytes | bytes }} in total. Row counts are the planner's
 estimates; "—" means the table has not been analysed yet.</p>
 {% if db_tables %}
+<div class="table-wrap">
 <table>
   <thead>
     <tr>
@@ -92,12 +99,13 @@ estimates; "—" means the table has not been analysed yet.</p>
     {% for row in db_tables %}
     <tr>
       <th scope="row" class="mono">{{ row.schema }}.{{ row.name }}</th>
-      <td class="num">{% if row.estimated_rows is none or row.estimated_rows < 0 %}<span class="empty">—</span>{% else %}{{ row.estimated_rows | int | number }}{% endif %}</td>
+      <td class="num">{% if row.estimated_rows is none or row.estimated_rows < 0 %}<span class="muted">—</span>{% else %}{{ row.estimated_rows | int | number }}{% endif %}</td>
       <td class="num">{{ row.bytes | bytes }}</td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% else %}
 {{ empty("No tables found. Run: make migrate") }}
 {% endif %}
@@ -110,6 +118,7 @@ new files on every export; snapshot tables are rewritten whole.</p>
 {% elif not lake_exported %}
 {{ empty("The lake has not been exported yet. Run: make lake") }}
 {% else %}
+<div class="table-wrap">
 <table>
   <thead>
     <tr>
@@ -128,16 +137,18 @@ new files on every export; snapshot tables are rewritten whole.</p>
       <td>{{ row.mode }}</td>
       <td class="num">{{ row.files | number }}</td>
       <td class="num">{{ row.rows | number }}</td>
-      <td>{% if row.exported_at %}<span title="Export {{ row.export_id }}">{{ row.exported_at | dt }}</span> <span class="empty">({{ row.exported_rows | number }} rows written)</span>{% else %}<span class="empty">never</span>{% endif %}</td>
+      <td>{% if row.exported_at %}<span title="Export {{ row.export_id }}">{{ row.exported_at | dt }}</span> <span class="muted">({{ row.exported_rows | number }} rows written)</span>{% else %}<span class="muted">never</span>{% endif %}</td>
       <td>{{ row.watermark | dt }}</td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% endif %}
 
 <h2 id="warehouse">Warehouse</h2>
 {% if warehouse %}
+<div class="table-wrap">
 <table>
   <tbody>
     <tr><th scope="row">File</th><td class="mono">{{ warehouse_path }}</td></tr>
@@ -145,6 +156,7 @@ new files on every export; snapshot tables are rewritten whole.</p>
     <tr><th scope="row">Built</th><td>{{ warehouse.modified | dt }} ({{ warehouse.modified | ago }})</td></tr>
   </tbody>
 </table>
+</div>
 <p><a href="/marts">Browse the marts</a></p>
 {% else %}
 {{ empty("No DuckDB warehouse at " ~ warehouse_path ~ " yet. Build it with: make dbt") }}

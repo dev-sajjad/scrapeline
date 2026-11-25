@@ -4,16 +4,19 @@
 {% block content %}
 <nav aria-label="Breadcrumb"><a href="/storage">Storage</a> / raw</nav>
 <h1>Raw object <span class="mono">{{ sha256 | short(16) }}</span></h1>
+<div class="table-wrap">
 <table>
   <tbody>
     <tr><th scope="row">SHA-256</th><td class="mono">{{ sha256 }}</td></tr>
-    <tr><th scope="row">Size</th><td>{% if preview.size is not none %}{{ preview.size | bytes }}{% else %}<span class="empty">unknown</span>{% endif %}</td></tr>
-    <tr><th scope="row">Download</th><td><a href="/storage/raw/{{ sha256 }}/download" download>Save the original bytes</a> <span class="empty">(served as a file, never opened in the panel)</span></td></tr>
+    <tr><th scope="row">Size</th><td>{% if preview.size is not none %}{{ preview.size | bytes }}{% else %}<span class="muted">unknown</span>{% endif %}</td></tr>
+    <tr><th scope="row">Download</th><td><a href="/storage/raw/{{ sha256 }}/download" download>Save the original bytes</a> <span class="muted">(served as a file, never opened in the panel)</span></td></tr>
   </tbody>
 </table>
+</div>
 
 <h2>Fetches</h2>
 <p>{{ total_fetches | number }} {% if total_fetches == 1 %}fetch{% else %}fetches{% endif %} stored these exact bytes{% if total_fetches > fetches | length %}; the latest {{ fetches | length }} are shown{% endif %}.</p>
+<div class="table-wrap">
 <table>
   <thead>
     <tr>
@@ -38,6 +41,7 @@
     {% endfor %}
   </tbody>
 </table>
+</div>
 
 <h2>Cited by</h2>
 {% set cited = counts.values() | sum %}
@@ -47,19 +51,21 @@
   <li>{{ rows | number }} {{ "version" if name == "record_versions" else "row" }}{% if rows != 1 %}s{% endif %} in <code>{{ name }}</code></li>
   {% endfor %}
 </ul>
+<p>Some of them:</p>
+<div class="table-wrap">
 <table>
-  <caption class="empty">A few of them</caption>
   <thead><tr><th scope="col">Dataset</th><th scope="col">Record</th><th scope="col">Version</th></tr></thead>
   <tbody>
     {% for row in citing %}
     <tr>
       <td>{{ row.dataset }}</td>
       <th scope="row"><a class="mono" href="/data/{{ row.dataset }}/{{ row.id }}">{{ row.external_id | short(32) }}</a></th>
-      <td>{% if row.version is not none %}v{{ row.version }}{% else %}<span class="empty">current row</span>{% endif %}</td>
+      <td>{% if row.version is not none %}v{{ row.version }}{% else %}<span class="muted">current row</span>{% endif %}</td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% else %}
 {{ empty("No stored record cites this object, for example a page that produced no records or a document.") }}
 {% endif %}

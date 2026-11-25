@@ -20,6 +20,7 @@ Runs count on the day they started.</p>
 
 {% if totals %}
 <h2>Totals for the period</h2>
+<div class="table-wrap">
 <table>
   <thead>
     <tr>
@@ -54,10 +55,12 @@ Runs count on the day they started.</p>
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% endif %}
 
 <h2>By day</h2>
 {% if days %}
+<div class="table-wrap">
 <table>
   <thead>
     <tr>
@@ -94,6 +97,7 @@ Runs count on the day they started.</p>
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% else %}
 {{ empty("No health data yet. It appears once sources have run and the lake and dbt have been rebuilt.") }}
 {% endif %}

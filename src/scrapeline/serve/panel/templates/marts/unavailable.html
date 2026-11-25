@@ -14,7 +14,7 @@
   <p>The warehouse at <span class="mono">{{ path }}</span> could not be read.</p>
   <p>If dbt is building it right now, try again in a moment; otherwise rebuild it with
   <code>make dbt</code>.</p>
-  <p class="empty">The warehouse said: {{ detail }}</p>
+  <p class="muted">The warehouse said: {{ detail }}</p>
 </section>
 {% endif %}
 {% endblock %}

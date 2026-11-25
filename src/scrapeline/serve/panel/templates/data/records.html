@@ -3,7 +3,7 @@
 {% import "data/_macros.html" as dm %}
 {% block content %}
 <nav aria-label="Breadcrumb"><a href="/data">Data</a> / {{ info.name }}</nav>
-<h1>{{ info.name }} <span class="empty">v{{ info.version }} · {{ info.storage }}</span></h1>
+<h1>{{ info.name }} <span class="muted">v{{ info.version }} · {{ info.storage }}</span></h1>
 <p>{{ info.description }}</p>
 {% if info.typed %}
 <p>Typed dataset: rows live in their own table and keep only the current values, without version history.</p>
@@ -34,6 +34,7 @@
 <p>{{ total | number }} {% if total == 1 %}record{% else %}records{% endif %}{% if not info.typed and filters.state != "all" %} ({{ filters.state }}){% endif %}, most recently seen first.</p>
 
 {% if rows %}
+<div class="table-wrap">
 <table>
   <thead>
     <tr>
@@ -61,12 +62,13 @@
     {% endfor %}
   </tbody>
 </table>
+</div>
 {{ pager(request, page, total) }}
 {% if more %}
-<p class="empty">More fields on each record's page: {{ more | join(", ") }}.</p>
+<p class="table-note">More fields on each record's page: {{ more | join(", ") }}.</p>
 {% endif %}
 {% if empty_fields %}
-<p class="empty">Not shown because they are empty on this page: {{ empty_fields | join(", ") }}.</p>
+<p class="table-note">Not shown because they are empty on this page: {{ empty_fields | join(", ") }}.</p>
 {% endif %}
 {% elif filters.q or filters.source_id or filters.state != "current" %}
 {{ empty("No records match these filters.") }}

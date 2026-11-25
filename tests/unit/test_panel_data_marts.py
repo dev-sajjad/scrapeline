@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 
 from scrapeline.serve.panel.app import create_app
+from scrapeline.serve.panel.pages import marts
 from scrapeline.serve.panel.pages.marts import MART_COLUMNS, MINUS, product_href
 from scrapeline.settings import Settings
 from tests.conftest import ROOT
@@ -266,18 +267,33 @@ def _health_rows() -> list[dict[str, Any]]:
     return rows
 
 
+def _insert(con: duckdb.DuckDBPyConnection, mart: str, rows: list[dict[str, Any]]) -> None:
+    names = [n for n, _ in WAREHOUSE_DDL[mart]]
+    con.executemany(
+        f"INSERT INTO {mart} VALUES ({', '.join('?' for _ in names)})",
+        [[row[n] for n in names] for row in rows],
+    )
+
+
 def build_warehouse(path: Path, marts: tuple[str, ...] = tuple(WAREHOUSE_DDL)) -> None:
     with duckdb.connect(str(path)) as con:
         con.execute("SET TimeZone = 'UTC'")
         for mart in marts:
             columns = WAREHOUSE_DDL[mart]
             con.execute(f"CREATE TABLE {mart} ({', '.join(f'{n} {t}' for n, t in columns)})")
-            rows = HISTORY if mart == "product_price_history" else _health_rows()
-            names = [n for n, _ in columns]
-            con.executemany(
-                f"INSERT INTO {mart} VALUES ({', '.join('?' for _ in names)})",
-                [[row[n] for n in names] for row in rows],
-            )
+            _insert(con, mart, HISTORY if mart == "product_price_history" else _health_rows())
+
+
+def add_history(path: Path, rows: list[dict[str, Any]]) -> None:
+    """More product versions in a built warehouse, for a test that needs a special case."""
+    with duckdb.connect(str(path)) as con:
+        con.execute("SET TimeZone = 'UTC'")
+        _insert(con, "product_price_history", rows)
+
+
+def retitled(rows: list[dict[str, Any]], *titles: str) -> list[dict[str, Any]]:
+    """The same versions with a title per version, as when a shop renames a product."""
+    return [{**row, "title": title} for row, title in zip(rows, titles, strict=True)]
 
 
 def client_for(warehouse: Path) -> TestClient:
@@ -371,6 +387,67 @@ def test_product_page_shows_removals_and_stock_changes(client: TestClient) -> No
     assert "yes → no" in stock
 
 
+def test_unknown_stock_is_not_shown_as_out_of_stock(warehouse: Path) -> None:
+    # Availability was not parsed on the first and last observation: unknown, not "no".
+    teapot: list[tuple[str, str | None, bool | None]] = [
+        ("insert", "20.00", None),
+        ("update", "20.00", True),
+        ("update", "20.00", None),
+    ]
+    add_history(warehouse, _product(6, "SIM-0009", "Teapot", teapot))
+    body = main(client_for(warehouse).get("/marts/price-history/shop/SIM-0009").text)
+    stock = body.split("<h2>Stock changes</h2>", 1)[1].split("<h2>", 1)[0]
+    unknown = '<span class="muted">—</span>'
+    assert re.findall(r"<td>(.*?)</td>", stock) == [f"yes → {unknown}", f"{unknown} → yes"]
+    versions = body.split("<h2>Versions</h2>", 1)[1]
+    assert "<td>no</td>" not in versions and versions.count(f"<td>{unknown}</td>") == 2
+
+
+def test_a_long_history_shows_its_latest_versions(
+    warehouse: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    updates = [("update", price, True) for price in ("32.00", "34.00", "35.00")]
+    kettle = _product(7, "SIM-0012", "Kettle", [("insert", "30.00", True), *updates])
+    add_history(warehouse, retitled(kettle, "Kettle", "Kettle", "Kettle", "Kettle (new model)"))
+    monkeypatch.setattr(marts, "MAX_HISTORY", 3)
+    body = main(client_for(warehouse).get("/marts/price-history/shop/SIM-0012").text)
+    # The title and the end of the chart come from the current version, not an old one.
+    assert "<h1>Kettle (new model)</h1>" in body
+    assert "4 versions in all; the chart and tables show the latest 3." in body
+    versions = body.split("<h2>Versions</h2>", 1)[1]
+    numbers = re.findall(r'<th scope="row" class="num">(\d+)</th>', versions)
+    assert numbers == ["4", "3", "2"]
+    svg = body.split("<svg", 1)[1].split("</svg>", 1)[0]
+    assert "From 32.00 GBP on 2026-11-02 09:00 UTC to 35.00 GBP on 2026-11-04" in svg
+
+
+def test_a_complete_history_has_no_truncation_note(client: TestClient) -> None:
+    assert "versions in all" not in client.get("/marts/price-history/shop/SIM-0002").text
+
+
+def test_movers_search_compares_a_renamed_products_first_and_latest_price(
+    warehouse: Path,
+) -> None:
+    mug = _product(
+        8,
+        "SIM-0011",
+        "Mug",
+        [("insert", "10.00", True), ("update", "8.00", True), ("update", "7.00", True)],
+    )
+    add_history(warehouse, retitled(mug, "Mug", "Mug (sale)", "Mug (sale)"))
+    client = client_for(warehouse)
+    body = main(client.get("/marts/price-history", params={"q": "sale"}).text)
+    movers = body.split("<h2>Biggest movers</h2>", 1)[1].split("<h2>", 1)[0]
+    # 10.00 -> 7.00, not 8.00 -> 7.00 from only the versions whose title says "sale".
+    assert '<td class="num">10.00 GBP</td>' in movers and "8.00 GBP" not in movers
+    assert MINUS + "3.00" in movers and MINUS + "30.0%" in movers
+    # The search matches the product's current title, as the product list does.
+    body = main(client.get("/marts/price-history", params={"q": "Mug"}).text)
+    assert "Mug (sale)" in body.split("<h2>Biggest movers</h2>", 1)[1].split("<h2>", 1)[0]
+    body = main(client.get("/marts/price-history", params={"q": "SIM-0011"}).text)
+    assert "Mug (sale)" in body.split("<h2>Biggest movers</h2>", 1)[1].split("<h2>", 1)[0]
+
+
 def test_product_ids_that_are_urls_work(client: TestClient) -> None:
     page = client.get(product_href("shop", URL_ID))
     assert page.status_code == 200
@@ -416,6 +493,14 @@ MART_PAGES = (
     "/marts/price-history/shop/SIM-0002",
     "/marts/scraper-health",
 )
+
+
+@pytest.mark.parametrize("path", MART_PAGES)
+def test_mart_pages_use_the_shell_layout(client: TestClient, path: str) -> None:
+    # Tables scroll in the shell's wrapper on a phone; `.empty` is only the empty-state box.
+    body = main(client.get(path).text)
+    assert body.count("<table") == body.count('<div class="table-wrap">\n<table') > 0
+    assert '<span class="empty"' not in body and "<caption" not in body
 
 
 @pytest.mark.parametrize("path", MART_PAGES)

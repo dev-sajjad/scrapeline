@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_macros.html" import empty %}
 {% from "marts/_chart.html" import step_chart %}
+{% from "marts/_macros.html" import in_stock %}
 {% import "data/_macros.html" as dm %}
 {% block content %}
 <nav aria-label="Breadcrumb"><a href="/marts">Marts</a> / <a href="/marts/price-history">price history</a> / {{ product.external_id | short(32) }}</nav>
@@ -11,6 +12,9 @@
   · <a href="/data/product/{{ product.record_id }}">record lineage</a>
   {% if product.url and product.url.lower().startswith(("http://", "https://")) %}· <a href="{{ product.url }}" rel="noopener noreferrer nofollow">product page</a>{% endif %}
 </p>
+{% if total_versions > history | length %}
+<p class="muted">{{ total_versions | number }} versions in all; the chart and tables show the latest {{ history | length | number }}.</p>
+{% endif %}
 
 <h2>Price over time</h2>
 {% if chart %}
@@ -21,6 +25,7 @@
 
 <h2>Stock changes</h2>
 {% if stock_changes %}
+<div class="table-wrap">
 <table>
   <thead>
     <tr>
@@ -33,17 +38,19 @@
     {% for row in stock_changes %}
     <tr>
       <th scope="row">{{ row.valid_from | dt }}</th>
-      <td>{{ "yes" if row.previous_in_stock else "no" }} → {{ "yes" if row.in_stock else "no" }}</td>
+      <td>{{ in_stock(row.previous_in_stock) }} → {{ in_stock(row.in_stock) }}</td>
       <td class="num">{{ row.stock_quantity_change if row.stock_quantity_change is not none else "—" }}</td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% else %}
 {{ empty("Stock availability has not changed.") }}
 {% endif %}
 
 <h2>Versions</h2>
+<div class="table-wrap">
 <table>
   <thead>
     <tr>
@@ -64,14 +71,15 @@
       <th scope="row" class="num">{{ row.version }}</th>
       <td>{{ dm.change(row.change_type) }}</td>
       <td>{{ row.valid_from | dt }}</td>
-      <td>{% if row.valid_to %}{{ row.valid_to | dt }}{% else %}<span class="empty">{{ "still removed" if row.is_removed else "current" }}</span>{% endif %}</td>
+      <td>{% if row.valid_to %}{{ row.valid_to | dt }}{% else %}<span class="muted">{{ "still removed" if row.is_removed else "current" }}</span>{% endif %}</td>
       <td class="num">{{ row.new }}</td>
       <td class="num">{{ row.change }}</td>
       <td class="num">{{ row.change_pct }}</td>
-      <td>{% if row.in_stock is none %}<span class="empty">—</span>{% elif row.in_stock %}yes{% else %}no{% endif %}</td>
+      <td>{{ in_stock(row.in_stock) }}</td>
       <td>{{ dm.raw_link(row.raw_sha256) }}</td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% endblock %}

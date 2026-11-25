@@ -112,6 +112,7 @@ def _fetch(
     key: str | None,
     content_type: str,
     nbytes: int,
+    fetched_at: datetime = NOW,
 ) -> None:
     with engine.begin() as conn:
         conn.execute(
@@ -124,7 +125,7 @@ def _fetch(
                 content_type=content_type,
                 raw_sha256=sha256,
                 raw_key=key,
-                fetched_at=NOW,
+                fetched_at=fetched_at,
             )
         )
 
@@ -233,6 +234,28 @@ def test_binary_raw_objects_are_not_previewed(
     download = client.get(f"/storage/raw/{ref.sha256}/download")
     assert download.content == pdf
     assert download.headers["content-disposition"] == f'attachment; filename="{ref.sha256}.pdf"'
+
+
+def test_storage_counts_raw_files_as_they_are_on_disk(
+    clean_db: Engine, settings: Settings, client: TestClient
+) -> None:
+    # An unchanged page fetched twice a day for three days: one file per day, as the
+    # date is part of the raw key.
+    run_id = _source_and_run(clean_db)
+    store = FilesystemRawStore(settings.raw_store_dir)
+    page = b"<html><body>An unchanged catalogue</body></html>"
+    for day in (18, 19, 20):
+        fetched_at = NOW.replace(day=day)
+        ref = store.put("hostile", page, "html", fetched_at)
+        for _ in range(2):
+            _fetch(clean_db, run_id, ref.sha256, ref.key, "text/html", len(page), fetched_at)
+    on_disk = [path for path in settings.raw_store_dir.rglob("*") if path.is_file()]
+    assert len(on_disk) == 3
+    raw = main(client.get("/storage").text).split('<h2 id="raw">', 1)[1].split("<h2", 1)[0]
+    assert "<dt>Objects</dt><dd>3</dd>" in raw
+    assert f"<dt>Size</dt><dd>{3 * len(page)} B</dd>" in raw
+    row = raw.split('<a href="/sources/hostile">hostile</a></th>', 1)[1].split("</tr>", 1)[0]
+    assert re.findall(r'<td class="num">([^<]*)</td>', row) == ["3", f"{3 * len(page)} B", "6"]
 
 
 def test_a_missing_raw_file_is_reported(clean_db: Engine, client: TestClient) -> None:

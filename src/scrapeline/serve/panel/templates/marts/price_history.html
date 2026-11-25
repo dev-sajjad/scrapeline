@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_macros.html" import badge, empty %}
+{% from "marts/_macros.html" import in_stock %}
 {% block content %}
 <nav aria-label="Breadcrumb"><a href="/marts">Marts</a> / price history</nav>
 <h1>Price history</h1>
@@ -22,8 +23,9 @@ Each version is compared with the last observed one before it.</p>
 
 <h2>Biggest movers</h2>
 {% if movers %}
+<p>First observed price against the latest one, largest change first.</p>
+<div class="table-wrap">
 <table>
-  <caption class="empty">First observed price against the latest one, largest change first.</caption>
   <thead>
     <tr>
       <th scope="col">Product</th>
@@ -49,12 +51,14 @@ Each version is compared with the last observed one before it.</p>
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% else %}
 {{ empty("No price movements to show.") }}
 {% endif %}
 
 <h2>Latest price changes</h2>
 {% if changes %}
+<div class="table-wrap">
 <table>
   <thead>
     <tr>
@@ -81,12 +85,14 @@ Each version is compared with the last observed one before it.</p>
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% else %}
 {{ empty("No price changes match.") }}
 {% endif %}
 
 <h2>Products</h2>
 {% if products %}
+<div class="table-wrap">
 <table>
   <thead>
     <tr>
@@ -103,13 +109,14 @@ Each version is compared with the last observed one before it.</p>
       <th scope="row"><a href="{{ row.href }}">{{ row.title or row.external_id }}</a>{% if row.is_removed %} {{ badge("removed") }}{% endif %}</th>
       <td>{{ row.source_id }}</td>
       <td class="num">{{ row.price }}</td>
-      <td>{% if row.in_stock is none %}<span class="empty">—</span>{% elif row.in_stock %}yes{% else %}no{% endif %}</td>
+      <td>{{ in_stock(row.in_stock) }}</td>
       <td>{{ row.valid_from | dt }}</td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
-{% if more_products %}<p class="empty">Only the first {{ products | length }} are listed; filter to narrow them down.</p>{% endif %}
+</div>
+{% if more_products %}<p class="table-note">Only the first {{ products | length }} are listed; filter to narrow them down.</p>{% endif %}
 {% else %}
 {{ empty("No products match.") }}
 {% endif %}

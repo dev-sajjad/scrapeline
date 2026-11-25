@@ -12,6 +12,7 @@ are exact. A type marked "not synced" is defined in files but not yet recorded i
 {% endif %}
 
 {% if rows %}
+<div class="table-wrap">
 <table>
   <thead>
     <tr>
@@ -39,19 +40,20 @@ are exact. A type marked "not synced" is defined in files but not yet recorded i
       <td class="num">{{ info.fields | length }}</td>
       <td class="num">{{ info.key_fields | length }}</td>
       <td class="num">{{ usage.current | number }}</td>
-      <td class="num">{% if usage.removed is none %}<span class="empty">—</span>{% else %}{{ usage.removed | number }}{% endif %}</td>
+      <td class="num">{% if usage.removed is none %}<span class="muted">—</span>{% else %}{{ usage.removed | number }}{% endif %}</td>
       <td>
         {% set ids = usage.sources | sort %}
         {% for source_id in ids[:sources_shown] %}<a href="/sources/{{ source_id }}">{{ source_id }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
         {% if ids | length > sources_shown %} and {{ ids | length - sources_shown }} more{% endif %}
-        {% if not ids %}<span class="empty">none</span>{% endif %}
+        {% if not ids %}<span class="muted">none</span>{% endif %}
       </td>
-      <td>{% if usage.last_seen %}<time datetime="{{ usage.last_seen.isoformat() }}" title="{{ usage.last_seen | dt }}">{{ usage.last_seen | ago }}</time>{% else %}<span class="empty">never</span>{% endif %}</td>
-      <td><span class="empty">{{ info.pack }}</span> · {{ info.description }}</td>
+      <td>{% if usage.last_seen %}<time datetime="{{ usage.last_seen.isoformat() }}" title="{{ usage.last_seen | dt }}">{{ usage.last_seen | ago }}</time>{% else %}<span class="muted">never</span>{% endif %}</td>
+      <td><span class="muted">{{ info.pack }}</span> · {{ info.description }}</td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% else %}
 {{ empty("No dataset types yet. Define one in config/datasets/ or run: scrapeline dataset sync") }}
 {% endif %}
