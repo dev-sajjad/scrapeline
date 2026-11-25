@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% from "_macros.html" import empty, pager, filter_form, select_field %}
+{% from "runs/_table.html" import runs_table %}
+{% block content %}
+<div class="page-head">
+  <h1>Runs</h1>
+  <p class="lede">Every pipeline run, newest first.</p>
+</div>
+
+{% call filter_form("/runs", "Filter runs") %}
+  {{ select_field("source_id", "Source", source_choices, filters.source_id) }}
+  {{ select_field("status", "Status", status_choices, filters.status) }}
+  {{ select_field("kind", "Kind", kind_choices, filters.kind) }}
+{% endcall %}
+
+<div id="results">
+{% if runs %}
+{{ runs_table(runs) }}
+{{ pager(request, page, total) }}
+{% elif filtered %}
+{{ empty("No runs match these filters.") }}
+{% else %}
+<p class="empty">No runs yet. Start one with <code>scrapeline run &lt;source-id&gt;</code>, or let the scheduler enqueue due sources with <code>scrapeline schedule</code> and a running <code>scrapeline worker</code>.</p>
+{% endif %}
+</div>
+{% endblock %}

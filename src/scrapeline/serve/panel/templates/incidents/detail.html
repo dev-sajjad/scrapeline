@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge, reltime %}
+{% block content %}
+<div class="page-head">
+  <div class="crumbs"><a href="/incidents">Incidents</a></div>
+  <h1>Incident #{{ incident.id }}</h1>
+  <p class="lede">{{ badge(incident.status) }} {{ incident.kind }} on <a href="/sources/{{ incident.source_id | urlencode }}">{{ incident.source_id }}</a></p>
+</div>
+
+<p class="notice{% if incident.status != 'closed' %} notice-bad{% endif %}">{{ incident.summary }}</p>
+
+<dl class="kv">
+  <div><dt>Status</dt><dd>{{ badge(incident.status) }}</dd></div>
+  <div><dt>Kind</dt><dd>{{ incident.kind }}</dd></div>
+  <div><dt>Source</dt><dd><a href="/sources/{{ incident.source_id | urlencode }}">{{ incident.source_id }}</a></dd></div>
+  <div><dt>Occurrences</dt><dd>{{ occurrences | int | number }}</dd></div>
+  <div><dt>Opened</dt><dd>{{ incident.opened_at | dt }} <span class="muted">({{ reltime(incident.opened_at) }})</span></dd></div>
+  <div><dt>Closed</dt><dd>{% if incident.closed_at %}{{ incident.closed_at | dt }}{% else %}<span class="muted">not closed</span>{% endif %}</dd></div>
+  <div><dt>Opened by run</dt><dd>{% if incident.run_id %}<a class="mono" href="/runs/{{ incident.run_id }}">{{ incident.run_id }}</a>{% else %}—{% endif %}</dd></div>
+  {% if details.last_run_id %}<div><dt>Last seen in run</dt><dd><a class="mono" href="/runs/{{ details.last_run_id | urlencode }}">{{ details.last_run_id }}</a></dd></div>{% endif %}
+  {% if details.last_summary %}<div><dt>Last summary</dt><dd>{{ details.last_summary }}</dd></div>{% endif %}
+  {% if details.resolution %}<div><dt>Resolution</dt><dd>{{ details.resolution }}</dd></div>{% endif %}
+</dl>
+
+<h2>Details</h2>
+<pre>{{ incident.details | json(2) }}</pre>
+{% endblock %}
