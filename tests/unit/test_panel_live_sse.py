@@ -236,6 +236,17 @@ def test_live_feed_macro_builds_an_accessible_stream_url() -> None:
     assert "<time" not in page and "No events yet." not in page
 
 
+def test_an_empty_live_feed_has_an_empty_tbody_for_the_css_placeholder() -> None:
+    # `tbody:empty` matches only without any text, whitespace included.
+    page = templates.env.from_string(
+        '{% from "live/_macros.html" import live_feed %}{{ live_feed() }}'
+    ).render()
+    tbody = re.search(r"<tbody[^>]*>(.*?)</tbody>", page, flags=re.S)
+    assert tbody is not None and tbody.group(1) == ""
+    headers = re.findall(r"<th\b[^>]*>", page)
+    assert len(headers) == 4 and all('scope="col"' in th for th in headers)
+
+
 def test_live_feed_without_filters_streams_everything() -> None:
     page = templates.env.from_string(
         '{% from "live/_macros.html" import live_feed %}{{ live_feed() }}'
