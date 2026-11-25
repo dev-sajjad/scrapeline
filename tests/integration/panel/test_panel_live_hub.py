@@ -6,6 +6,7 @@ Every test starts from an empty database (`clean_db`), so event ids start at 1.
 from __future__ import annotations
 
 import asyncio
+import threading
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -171,10 +172,7 @@ async def test_hub_reconnects_and_delivers_events_committed_while_it_was_down(
         before = await apublish(clean_db, source_id="shop-sim", message="before")
         assert [e.id for e in await receive(subscription, 1)] == [before]
 
-        pid = hub.listener_pid
-        assert pid is not None
-        await asyncio.to_thread(_terminate, clean_db, pid)
-        await eventually(lambda: not hub.listening, "the hub notices its connection died")
+        pid = await kill_listener(hub, clean_db)
 
         during = [
             await apublish(clean_db, source_id="shop-sim", message="during 1"),
@@ -197,6 +195,77 @@ async def test_hub_reconnects_and_delivers_events_committed_while_it_was_down(
 def _terminate(engine: Engine, pid: int) -> None:
     with engine.connect() as conn:
         assert conn.execute(text("SELECT pg_terminate_backend(:pid)"), {"pid": pid}).scalar_one()
+
+
+async def kill_listener(hub: EventHub, engine: Engine) -> int:
+    """Terminate the hub's LISTEN backend and wait until the hub notices. Returns the old pid."""
+    pid = hub.listener_pid
+    assert pid is not None
+    await asyncio.to_thread(_terminate, engine, pid)
+    await eventually(lambda: not hub.listening, "the hub notices its connection died")
+    return pid
+
+
+@pytest.mark.anyio
+async def test_an_older_id_committed_during_an_outage_is_still_delivered(
+    clean_db: Engine,
+) -> None:
+    # Ids are taken at insert time: a long transaction commits id 1 after id 2 was delivered.
+    # The catch-up re-reads ids below the last one dispatched, so id 1 is not lost.
+    hub = EventHub(clean_db, backoff=(1.0, 1.0))
+    inserted, commit = threading.Event(), threading.Event()
+
+    def long_transaction() -> int:
+        with clean_db.begin() as conn:
+            event_id = publish_in(conn, Event(kind="run.finished", message="slow commit"))
+            inserted.set()
+            assert commit.wait(TIMEOUT), "the test never released the transaction"
+        assert event_id is not None
+        return event_id
+
+    try:
+        subscription = await hub.subscribe(EventFilter())
+        slow = asyncio.ensure_future(asyncio.to_thread(long_transaction))
+        assert await asyncio.to_thread(inserted.wait, TIMEOUT)
+        newer = await apublish(clean_db, message="newer")
+        assert [e.id for e in await receive(subscription, 1)] == [newer]
+
+        await kill_listener(hub, clean_db)
+        commit.set()
+        older = await slow
+        assert older < newer
+        assert hub.listener_pid is None, "the hub reconnected before the commit"
+
+        [caught_up] = await receive(subscription, 1)
+        assert (caught_up.id, caught_up.message) == (older, "slow commit")
+        assert await nothing_more(subscription)
+    finally:
+        commit.set()
+        await hub.stop()
+
+
+@pytest.mark.anyio
+async def test_events_from_before_the_hub_listened_are_not_sent_on_reconnect(
+    clean_db: Engine,
+) -> None:
+    # Subscribers replay older events themselves; the hub must not send them a second time.
+    before = await apublish(clean_db, message="before the hub")
+    hub = EventHub(clean_db, backoff=(0.05, 0.05))
+    try:
+        subscription = await hub.subscribe(EventFilter())
+        first = await apublish(clean_db, message="first")
+        assert [e.id for e in await receive(subscription, 1)] == [first]
+
+        old_pid = await kill_listener(hub, clean_db)
+        await eventually(
+            lambda: hub.listening and hub.listener_pid not in (None, old_pid), "the hub reconnects"
+        )
+        after = await apublish(clean_db, message="after the reconnect")
+        assert [e.id for e in await receive(subscription, 1)] == [after]
+        assert before < first < after
+        assert await nothing_more(subscription)
+    finally:
+        await hub.stop()
 
 
 @pytest.mark.anyio
