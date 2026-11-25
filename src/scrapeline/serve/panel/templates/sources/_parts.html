@@ -1,0 +1,13 @@
+{# Pieces shared by the sources list, the source page and health. #}
+{% from "_macros.html" import badge, reltime %}
+
+{% macro attention_flags(reasons) -%}
+{% if reasons %}<span class="flags">{% for reason in reasons %}{{ badge(reason, "failed" if reason == "last run failed" else reason) }}{% endfor %}</span>{% endif %}
+{%- endmacro %}
+
+{% macro last_run_cell(run) -%}
+{% if run %}
+<a href="/runs/{{ run.id }}">{{ badge(run.status) }}</a>
+{{ reltime(run.started_at) }}
+{% else %}<span class="muted">never run</span>{% endif %}
+{%- endmacro %}

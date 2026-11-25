@@ -1,0 +1,38 @@
+{# The runs table, used by the runs list and the source page. #}
+{% from "_macros.html" import badge, reltime %}
+
+{% macro runs_table(runs, show_source=true) -%}
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th scope="col">Started</th>
+      {% if show_source %}<th scope="col">Source</th>{% endif %}
+      <th scope="col">Kind</th>
+      <th scope="col">Status</th>
+      <th scope="col" class="num">Duration</th>
+      <th scope="col" class="num">Pages</th>
+      <th scope="col">Loaded</th>
+      <th scope="col" class="num">Rejects</th>
+      <th scope="col">Error</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for run in runs %}
+    {% set stats = run.stats or {} %}
+    <tr{% if run.status == "failed" %} class="flagged"{% endif %}>
+      <th scope="row" class="nowrap"><a href="/runs/{{ run.id }}" title="Run {{ run.id }}">{{ reltime(run.started_at) }}</a></th>
+      {% if show_source %}<td class="nowrap"><a href="/sources/{{ run.source_id | urlencode }}">{{ run.source_id }}</a></td>{% endif %}
+      <td>{{ run.kind }}</td>
+      <td>{{ badge(run.status) }}</td>
+      <td class="num nowrap">{{ run.started_at | duration(run.finished_at) }}</td>
+      <td class="num">{{ stats.pages | number }}</td>
+      <td class="wrap">{{ stats.loaded | loaded }}</td>
+      <td class="num">{{ stats.rejects | number }}</td>
+      <td class="wrap">{% if run.error %}<span title="{{ run.error }}">{{ run.error | short(90) }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{%- endmacro %}
