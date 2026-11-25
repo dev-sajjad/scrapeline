@@ -7,7 +7,7 @@
 <section class="verdict verdict-{{ state }}">
   <h1>Health</h1>
   {% if state == "ok" %}
-  <p>All clear: no failing or overdue sources, no stalled or failed jobs, no open incidents.</p>
+  <p>All clear: no failing or overdue sources, no stalled jobs, no jobs failed in the last {{ failed_hours }} hours, no open incidents.</p>
   {% else %}
   <p>{{ problems | join(", ") }}.</p>
   {% endif %}
@@ -19,7 +19,7 @@
   <div><dt>Jobs queued</dt><dd>{{ queue.queued | number }}<small>{% if queue.oldest_queued %}oldest {{ reltime(queue.oldest_queued) }}{% else %}queue empty{% endif %}</small></dd></div>
   <div><dt>Jobs running</dt><dd>{{ queue.running | number }}<small>claimed by a worker</small></dd></div>
   <div{% if queue.stalled %} class="is-warn"{% endif %}><dt>Stalled jobs</dt><dd>{{ queue.stalled | number }}<small>lease expired while running</small></dd></div>
-  <div{% if queue.failed %} class="is-bad"{% endif %}><dt>Failed jobs</dt><dd>{{ queue.failed | number }}<small>out of retries</small></dd></div>
+  <div{% if queue.failed %} class="is-bad"{% endif %}><dt>Failed jobs ({{ failed_hours }} h)</dt><dd>{{ queue.failed | number }}<small>out of retries; {{ queue.failed_total | number }} in all</small></dd></div>
   <div{% if open_incidents %} class="is-bad"{% endif %}><dt>Open incidents</dt><dd>{{ open_incidents | number }}<small>open or acknowledged</small></dd></div>
   <div><dt>Lake export</dt><dd>
     {% if lake.error %}unreadable<small>{{ lake.error | short(80) }}</small>
@@ -41,7 +41,7 @@
       <th scope="col">Status</th>
       <th scope="col">Cadence</th>
       <th scope="col">Last run</th>
-      <th scope="col" class="num">Records in last run</th>
+      <th scope="col" class="num">Loaded in last run</th>
       <th scope="col" class="num">Open incidents</th>
     </tr>
   </thead>
@@ -52,7 +52,7 @@
       <td>{{ badge(row.status) }} {{ attention_flags(row.attention) }}</td>
       <td>{{ row.cadence }}</td>
       <td class="nowrap">{{ last_run_cell(row.last_run) }}</td>
-      <td class="num">{% if row.last_run %}{{ row.last_run.records | number }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num">{% if row.last_run %}{{ row.last_run.loaded | number }}{% else %}<span class="muted">—</span>{% endif %}</td>
       <td class="num">{% if row.open_incidents %}<a href="/incidents?source_id={{ row.id | urlencode }}">{{ row.open_incidents | number }}</a>{% else %}0{% endif %}</td>
     </tr>
     {% endfor %}

@@ -12,7 +12,9 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Connection, Engine
+from selectolax.lexbor import LexborHTMLParser as HTMLParser
+from selectolax.lexbor import LexborNode as Node
+from sqlalchemy import Connection, Engine, event
 
 from scrapeline.serve.panel.app import create_app
 from scrapeline.store import tables as t
@@ -67,6 +69,7 @@ def add_run(
     started: datetime = NOW,
     kind: str = "incremental",
     error: str | None = None,
+    stats: dict[str, Any] | None = None,
 ) -> uuid.UUID:
     run_id = uuid.uuid4()
     conn.execute(
@@ -77,7 +80,7 @@ def add_run(
             status=status,
             started_at=started,
             finished_at=started + timedelta(seconds=2),
-            stats={"pages": 1, "records": {"product": 3}},
+            stats={"pages": 1, "records": {"product": 3}} if stats is None else stats,
             error=error,
         )
     )
@@ -117,14 +120,40 @@ def test_filters_on_an_empty_database_say_nothing_matches(client: TestClient) ->
 
 def test_hostile_values_are_escaped_everywhere(client: TestClient, clean_db: Engine) -> None:
     with clean_db.begin() as conn:
+        # Scraped page content ends up in site evidence, tags and platform.
+        site_id = conn.execute(
+            t.site.insert()
+            .values(
+                host="hostile.example",
+                category_method="evidence",
+                category_evidence=[
+                    {"signal": SCRIPT, "value": SCRIPT, "weight": SCRIPT},
+                    SCRIPT,
+                ],
+                tags=[SCRIPT, {"tag": SCRIPT}],
+                platform=SCRIPT,
+            )
+            .returning(t.site.c.id)
+        ).scalar_one()
         add_source(
             conn,
             "hostile",
             name=SCRIPT,
             status_note=SCRIPT,
+            site_id=site_id,
             config={"entry": "javascript:alert(1)", "usage": {"purpose": SCRIPT}},
         )
         run_id = add_run(conn, "hostile", status="failed", error=SCRIPT)
+        conn.execute(
+            t.rejects.insert().values(
+                run_id=run_id,
+                source_id="hostile",
+                record_type=SCRIPT,
+                raw_sha256="0" * 64,
+                record={"title": SCRIPT, SCRIPT: 1},
+                reason=SCRIPT,
+            )
+        )
         incident_id = conn.execute(
             t.incident.insert()
             .values(
@@ -154,12 +183,81 @@ def test_hostile_values_are_escaped_everywhere(client: TestClient, clean_db: Eng
         f"/runs/{run_id}",
         "/incidents",
         f"/incidents/{incident_id}",
+        "/sites",
+        "/sites/hostile.example",
     ):
         page = client.get(path)
         assert page.status_code == 200, path
         assert SCRIPT not in page.text, path
         assert ESCAPED in page.text, path
         assert 'href="javascript:' not in page.text, path
+
+
+def test_run_page_lists_the_first_rejects_with_their_raw_files(
+    client: TestClient, clean_db: Engine
+) -> None:
+    sha = "ab" * 32
+    with clean_db.begin() as conn:
+        add_source(conn, "rejecting")
+        run_id = add_run(conn, "rejecting")
+        conn.execute(
+            t.rejects.insert(),
+            [
+                {
+                    "run_id": run_id,
+                    "source_id": "rejecting",
+                    "record_type": "product",
+                    "raw_sha256": sha,
+                    "record": {"n": n, "title": SCRIPT if n == 0 else f"Book {n}"},
+                    "reason": SCRIPT if n == 0 else f"price: not a money value ({n})",
+                }
+                for n in range(21)
+            ],
+        )
+    page = client.get(f"/runs/{run_id}")
+    assert page.status_code == 200
+    tree = HTMLParser(page.text)
+    heading = next(h2 for h2 in tree.css("h2") if h2.text().startswith("Rejects"))
+    assert " ".join(heading.text().split()) == "Rejects 21"
+    table = heading.next
+    while table is not None and table.tag != "div":
+        table = table.next
+    assert table is not None
+    shown = table.css("tbody tr")
+    assert len(shown) == 20
+    assert "price: not a money value (1)" in shown[1].text()
+    assert "The first 20 of 21 rejects." in page.text
+    for row in shown:
+        assert row.css_first(f'a[href="/storage/raw/{sha}"]') is not None
+        record = row.css_first("details.json pre")
+        assert record is not None and '"n":' in record.text()
+    assert SCRIPT not in page.text
+    assert ESCAPED in (shown[0].html or "")  # in the reason
+    record = shown[0].css_first("details.json pre")
+    assert record is not None and '"title": "&lt;script&gt;' in (record.html or "")
+
+
+def test_run_page_lists_incidents_it_repeated(client: TestClient, clean_db: Engine) -> None:
+    with clean_db.begin() as conn:
+        add_source(conn, "repeating")
+        first = add_run(conn, "repeating", status="failed", started=NOW - timedelta(hours=2))
+        repeat = add_run(conn, "repeating", status="failed")
+        unrelated = add_run(conn, "repeating", started=NOW - timedelta(hours=1))
+        # Opened by the first run; the second run found the same problem and is recorded
+        # as the incident's last run.
+        conn.execute(
+            t.incident.insert().values(
+                source_id="repeating",
+                run_id=first,
+                kind="fetch_error",
+                summary="Site answered 503 twice",
+                details={"occurrences": 2, "last_run_id": str(repeat)},
+            )
+        )
+    for run_id, listed in ((first, True), (repeat, True), (unrelated, False)):
+        page = client.get(f"/runs/{run_id}").text
+        assert ("Site answered 503 twice" in page) is listed, run_id
+    assert "This run opened or repeated no incident." in client.get(f"/runs/{unrelated}").text
 
 
 def test_unreviewed_terms_are_flagged(client: TestClient, clean_db: Engine) -> None:
@@ -222,6 +320,117 @@ def test_health_counts_stalled_and_failed_jobs(client: TestClient, clean_db: Eng
             )
         )
         conn.execute(t.job.insert().values(kind="run", source_id="queue-test", status="dead"))
+        add_dead_job(conn, "queue-test", NOW - timedelta(days=3))
     page = client.get("/").text
-    assert "1 stalled job, 1 failed job." in page
+    assert "1 stalled job, 1 failed job in the last 24 h." in page
     assert "verdict-bad" in page
+    assert failed_jobs_tile(page) == "1 out of retries; 2 in all"
+
+
+def test_health_does_not_count_records(client: TestClient, clean_db: Engine) -> None:
+    """Health shows no record counts, so it must not pay for scanning the records."""
+    with clean_db.begin() as conn:
+        add_source(conn, "counted")
+        add_run(conn, "counted")
+
+    def statements_for(path: str) -> list[str]:
+        seen: list[str] = []
+
+        def remember(conn: Any, cursor: Any, statement: str, *args: Any) -> None:
+            seen.append(statement)
+
+        event.listen(clean_db, "before_cursor_execute", remember)
+        try:
+            assert client.get(path).status_code == 200
+        finally:
+            event.remove(clean_db, "before_cursor_execute", remember)
+        return seen
+
+    assert not any("data.records" in sql for sql in statements_for("/"))
+    assert any("data.records" in sql for sql in statements_for("/sources"))  # shown there
+
+
+def test_jobs_that_died_days_ago_leave_health_clear(client: TestClient, clean_db: Engine) -> None:
+    """A dead job stays in the queue table; once it is old it no longer turns health red."""
+    with clean_db.begin() as conn:
+        add_source(conn, "recovered", status="draft")
+        add_dead_job(conn, "recovered", NOW - timedelta(days=3))
+        add_dead_job(conn, "recovered", NOW - timedelta(hours=25))
+    page = client.get("/").text
+    assert "All clear" in page
+    assert "verdict-ok" in page
+    assert failed_jobs_tile(page) == "0 out of retries; 2 in all"
+
+
+def text_of(node: Node, selector: str) -> str:
+    """Whitespace-normalised text of the first match, which must exist."""
+    found = node.css_first(selector)
+    assert found is not None, selector
+    return " ".join(found.text(separator=" ").split())
+
+
+def failed_jobs_tile(page: str) -> str:
+    for tile in HTMLParser(page).css("dl.stats > div"):
+        if text_of(tile, "dt") == "Failed jobs (24 h)":
+            return text_of(tile, "dd")
+    raise AssertionError("no failed jobs tile")
+
+
+def add_dead_job(conn: Connection, source_id: str, died: datetime) -> None:
+    conn.execute(
+        t.job.insert().values(
+            kind="run",
+            source_id=source_id,
+            status="dead",
+            attempts=3,
+            created_at=died - timedelta(minutes=30),
+            updated_at=died,
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("usage", "shown"),
+    [
+        ({"allow_pii": True, "purpose": "Contact sellers"}, "kept allow_pii with a stated purpose"),
+        (
+            {"allow_pii": True, "purpose": ""},
+            "blanked before storage no purpose allow_pii is set, but personal data is kept only"
+            " with a purpose",
+        ),
+        ({"allow_pii": False, "purpose": "Price tracking"}, "blanked before storage"),
+        ({"allow_pii": "yes please"}, "blanked before storage the usage block does not validate"),
+    ],
+)
+def test_personal_data_row_follows_the_record_store(
+    client: TestClient, clean_db: Engine, usage: dict[str, Any], shown: str
+) -> None:
+    with clean_db.begin() as conn:
+        add_source(conn, "pii", config={"usage": usage})
+    tree = HTMLParser(client.get("/sources/pii").text)
+    row = next(pair for pair in tree.css("dl.kv > div") if text_of(pair, "dt") == "Personal data")
+    assert text_of(row, "dd") == shown
+
+
+def test_health_shows_records_loaded_not_parsed(client: TestClient, clean_db: Engine) -> None:
+    with clean_db.begin() as conn:
+        # Parsed 20, but the load rolled back, so nothing was stored.
+        add_source(conn, "rolled-back")
+        rolled_back = {"pages": 1, "records": {"product": 20}, "loaded": {}}
+        add_run(conn, "rolled-back", status="failed", error="IntegrityError", stats=rolled_back)
+        add_source(conn, "loaded")
+        loaded = {"product": {"inserted": 2, "updated": 3, "unchanged": 10, "removed": 4}}
+        add_run(conn, "loaded", stats={"records": {"product": 15}, "loaded": loaded})
+        add_source(conn, "still-running")
+        add_run(conn, "still-running", status="running", stats={})
+    tree = HTMLParser(client.get("/").text)
+    headers = [" ".join(th.text().split()) for th in tree.css("thead th")]
+    column = headers.index("Loaded in last run")
+    for source_id, expected in (("rolled-back", "0"), ("loaded", "15"), ("still-running", "—")):
+        row = next(
+            row
+            for row in tree.css("tbody tr")
+            if row.css_first(f'a[href="/sources/{source_id}"]') is not None
+        )
+        cells = row.css("th, td")
+        assert cells[column].text().strip() == expected, source_id

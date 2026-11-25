@@ -53,7 +53,12 @@
     <div><dt>Terms checked</dt><dd>{% if config.terms_unreviewed %}{{ badge("not reviewed", "unreviewed") }} <span class="muted">{{ config.terms_checked or "missing" }}</span>{% else %}{{ config.terms_checked }}{% endif %}</dd></div>
     {% if config.legal_notes %}<div><dt>Legal notes</dt><dd>{{ config.legal_notes }}</dd></div>{% endif %}
     <div><dt>Purpose</dt><dd>{{ config.usage.purpose or "—" }}</dd></div>
-    <div><dt>Personal data</dt><dd>{% if config.usage.allow_pii %}kept (allow_pii){% else %}blanked before storage{% endif %}</dd></div>
+    <div><dt>Personal data</dt><dd>
+      {%- if config.personal_data == "kept" %}kept <span class="muted">allow_pii with a stated purpose</span>
+      {%- elif config.personal_data == "no-purpose" %}blanked before storage {{ badge("no purpose", "warn") }} <span class="muted">allow_pii is set, but personal data is kept only with a purpose</span>
+      {%- elif config.personal_data == "unreadable" %}blanked before storage <span class="muted">the usage block does not validate</span>
+      {%- else %}blanked before storage{% endif -%}
+    </dd></div>
     <div><dt>Retention</dt><dd>{% if config.usage.retention_days %}{{ config.usage.retention_days | number }} days{% else %}not set{% endif %}</dd></div>
     {% if config.usage.license %}<div><dt>Licence</dt><dd>{{ config.usage.license }}</dd></div>{% endif %}
   </dl>

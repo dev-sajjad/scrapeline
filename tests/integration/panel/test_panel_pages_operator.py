@@ -95,7 +95,7 @@ def test_health_flags_the_failed_source_and_counts_the_queue(client: TestClient)
     assert stat(tree, "Jobs queued").startswith("1 oldest")
     assert stat(tree, "Jobs running").startswith("0")
     assert stat(tree, "Stalled jobs").startswith("0")
-    assert stat(tree, "Failed jobs").startswith("0")
+    assert stat(tree, "Failed jobs (24 h)") == "0 out of retries; 0 in all"
     assert stat(tree, "Sources").startswith("2 1 draft, 1 active")
     assert stat(tree, "Need attention").startswith("1")
 
@@ -107,7 +107,7 @@ def test_health_flags_the_failed_source_and_counts_the_queue(client: TestClient)
     legistar = row_for(tree, "legistar-testcity")
     assert "flagged" not in classes(legistar)
     assert "succeeded" in text(legistar)
-    assert "149" in text(legistar)  # records parsed in its last run
+    assert "149" in text(legistar)  # records its last run loaded
 
 
 def test_health_lists_open_incidents_lake_state_and_activity(client: TestClient) -> None:

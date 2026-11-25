@@ -13,10 +13,23 @@ from scrapeline.serve.panel import filters
 from scrapeline.serve.panel.deps import templates
 from scrapeline.serve.panel.pages.health import lake_freshness, verdict
 from scrapeline.serve.panel.pages.runs import load_rows
-from scrapeline.serve.panel.pages.sources import attention, config_view, is_overdue
+from scrapeline.serve.panel.pages.sources import (
+    attention,
+    config_view,
+    is_overdue,
+    personal_data,
+    records_loaded,
+)
 
 NOW = datetime(2026, 11, 25, 12, 0, tzinfo=UTC)
-QUIET = {"queued": 0, "running": 0, "stalled": 0, "failed": 0, "oldest_queued": None}
+QUIET = {
+    "queued": 0,
+    "running": 0,
+    "stalled": 0,
+    "failed": 0,
+    "failed_total": 0,
+    "oldest_queued": None,
+}
 
 
 def render(source: str, **context: object) -> str:
@@ -66,10 +79,14 @@ def test_verdict_separates_known_problems_from_broken_scraping() -> None:
     assert problems == [
         "2 sources need attention",
         "1 stalled job",
-        "3 failed jobs",
+        "3 failed jobs in the last 24 h",
         "2 open incidents",
     ]
     assert verdict(1, QUIET, 0)[1] == ["1 source needs attention"]
+
+
+def test_jobs_that_died_long_ago_do_not_spoil_the_verdict() -> None:
+    assert verdict(0, {**QUIET, "failed_total": 7}, 0) == ("ok", [])
 
 
 def test_lake_never_exported(tmp_path: Path) -> None:
@@ -94,6 +111,39 @@ def test_config_view_flags_the_placeholder_review_date() -> None:
     )
     assert not view["terms_unreviewed"]
     assert view["locale"] == {"language": "en"}
+
+
+@pytest.mark.parametrize(
+    ("usage", "expected"),
+    [
+        ({"allow_pii": True, "purpose": "Contact the seller"}, "kept"),
+        # The record store keeps personal data only with a purpose as well.
+        ({"allow_pii": True}, "no-purpose"),
+        ({"allow_pii": True, "purpose": "   "}, "no-purpose"),
+        ({"allow_pii": False, "purpose": "Price tracking"}, "blanked"),
+        ({}, "blanked"),
+        (None, "blanked"),
+        # Usage that does not validate grants nothing, as in the lake export.
+        ({"allow_pii": "maybe", "purpose": "x"}, "unreadable"),
+        ({"allow_pii": True, "purpose": "x", "unknown": 1}, "unreadable"),
+        ("allow everything", "unreadable"),
+    ],
+)
+def test_personal_data_follows_the_record_store_rule(usage: object, expected: str) -> None:
+    assert personal_data(usage) == expected
+    assert config_view({"usage": usage})["personal_data"] == expected
+
+
+def test_records_loaded_counts_what_the_load_stored() -> None:
+    loaded = {
+        "product": {"inserted": 1, "updated": 8, "unchanged": 11, "restored": 2, "removed": 5},
+        "meeting": {"inserted": 25},
+        "junk": 3,
+    }
+    assert records_loaded(loaded) == 47  # removed records are not stored ones
+    assert records_loaded({}) == 0  # a load that rolled back
+    assert records_loaded(None) is None  # a run still going
+    assert records_loaded({"product": {"inserted": "3", "updated": None}}) == 0
 
 
 def test_load_rows_skip_malformed_stats() -> None:

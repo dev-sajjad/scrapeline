@@ -8,11 +8,13 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
+from pydantic import ValidationError
 from sqlalchemy import ColumnElement, Connection, case, func, or_, select
 from sqlalchemy.dialects.postgresql import distinct_on
 
 from scrapeline.ops.worker import CADENCE
-from scrapeline.registry.config import UNREVIEWED_TERMS, SourceConfig
+from scrapeline.pipeline.records import keeps_personal_data
+from scrapeline.registry.config import UNREVIEWED_TERMS, SourceConfig, UsageRights
 from scrapeline.serve.panel.deps import EngineDep, PageDep, render
 from scrapeline.store import tables as t
 
@@ -26,6 +28,8 @@ DEFAULT_CADENCE = str(SourceConfig.model_fields["cadence"].default)
 OVERDUE_GRACE = 0.5
 DETAIL_ROWS = 20
 CHOICES_LIMIT = 500
+# Load counts of records a run left stored; removed records are not among them.
+STORED_COUNTS = ("inserted", "updated", "unchanged", "restored")
 
 
 def is_overdue(status: str, cadence: str, last_started: datetime | None, now: datetime) -> bool:
@@ -68,7 +72,7 @@ def last_runs(conn: Connection, source_ids: Collection[str]) -> dict[str, Mappin
             r.c.started_at,
             r.c.finished_at,
             r.c.error,
-            r.c.stats["records"].label("records"),
+            r.c.stats["loaded"].label("loaded"),
         )
         .where(r.c.source_id.in_(source_ids))
         .ext(distinct_on(r.c.source_id))
@@ -83,13 +87,28 @@ def last_runs(conn: Connection, source_ids: Collection[str]) -> dict[str, Mappin
     )
     result: dict[str, Mapping[str, Any]] = {}
     for row in newest:
-        records = row["records"] if isinstance(row["records"], Mapping) else {}
         result[row["source_id"]] = {
             **row,
-            "records": sum(v for v in records.values() if isinstance(v, int)),
+            "loaded": records_loaded(row["loaded"]),
             "last_scheduled": scheduled.get(row["source_id"]),
         }
     return result
+
+
+def records_loaded(loaded: object) -> int | None:
+    """Records a run stored, summed over its datasets; None while the run has no load stats.
+
+    Parsed counts are not used: a load that rolls back keeps them but stores nothing.
+    """
+    if not isinstance(loaded, Mapping):
+        return None
+    total = 0
+    for counts in loaded.values():
+        if not isinstance(counts, Mapping):
+            continue
+        values = (counts.get(key) for key in STORED_COUNTS)
+        total += sum(n for n in values if isinstance(n, int))
+    return total
 
 
 def record_counts(conn: Connection, source_ids: Collection[str]) -> dict[str, int]:
@@ -127,15 +146,20 @@ def open_incident_counts(conn: Connection, source_ids: Collection[str]) -> dict[
 
 
 def source_overview(
-    conn: Connection, sources: Sequence[Mapping[Any, Any]], now: datetime
+    conn: Connection,
+    sources: Sequence[Mapping[Any, Any]],
+    now: datetime,
+    *,
+    with_counts: bool = True,
 ) -> list[dict[str, Any]]:
-    """Source rows joined with their last run, record count, open incidents and flags."""
+    """Source rows joined with their last run, record count, open incidents and flags.
+
+    Counting records scans every current record of the sources, so pages that do not show
+    the count pass `with_counts=False` and get None.
+    """
     ids = [row["id"] for row in sources]
-    runs, counts, incidents = (
-        last_runs(conn, ids),
-        record_counts(conn, ids),
-        open_incident_counts(conn, ids),
-    )
+    runs, incidents = last_runs(conn, ids), open_incident_counts(conn, ids)
+    counts = record_counts(conn, ids) if with_counts else None
     rows = []
     for source in sources:
         cadence = source.get("cadence") or DEFAULT_CADENCE
@@ -145,7 +169,7 @@ def source_overview(
                 **source,
                 "cadence": cadence,
                 "last_run": last,
-                "records": counts.get(source["id"], 0),
+                "records": counts.get(source["id"], 0) if counts is not None else None,
                 "open_incidents": incidents.get(source["id"], 0),
                 "attention": attention(
                     source["status"],
@@ -336,7 +360,24 @@ def config_view(config: Mapping[str, Any] | None) -> dict[str, Any]:
         "allowed_hosts": config.get("allowed_hosts") or [],
         "locale": {k: v for k, v in (config.get("locale") or {}).items() if v is not None},
         "usage": config.get("usage") or {},
+        "personal_data": personal_data(config.get("usage")),
         "terms_checked": terms,
         "terms_unreviewed": terms is None or str(terms) == UNREVIEWED_TERMS.isoformat(),
         "legal_notes": legal.get("notes"),
     }
+
+
+def personal_data(usage: object) -> str:
+    """What the pipeline does with personal-data fields under the stored usage rights.
+
+    'kept' needs allow_pii and a purpose; 'no-purpose' is allow_pii without one, which still
+    blanks them. Usage that does not validate grants nothing, as in the lake export, and is
+    reported as 'unreadable'.
+    """
+    try:
+        rights = UsageRights.model_validate(usage or {})
+    except ValidationError:
+        return "unreadable"
+    if keeps_personal_data(rights):
+        return "kept"
+    return "no-purpose" if rights.allow_pii else "blanked"
