@@ -18,11 +18,12 @@ import httpx
 import pytest
 import uvicorn
 from fastapi import FastAPI
-from sqlalchemy import Engine
+from sqlalchemy import Engine, text
 
 from scrapeline.ops.events import Event, publish_in
 from scrapeline.serve.panel.app import create_app
 from scrapeline.serve.panel.live import EventHub
+from scrapeline.serve.panel.pages.live import REPLAY_LIMIT, RESUME_LIMIT
 from tests.integration.panel.conftest import panel_settings
 
 pytestmark = pytest.mark.integration
@@ -179,6 +180,50 @@ def test_reconnect_with_last_event_id_replays_only_what_was_missed(
         assert [(m["id"], m["event"]) for m in replay] == [(str(i), "ops") for i in missed]
         status = sse.next_message()
         assert status["event"] == "status" and "caught up 2 missed events" in status["data"]
+
+
+def insert_events(engine: Engine, count: int) -> list[int]:
+    """Insert `count` events in one statement, without notifications, and return their ids."""
+    bulk = text(
+        "INSERT INTO ops.event (kind, message) SELECT 'run.started', 'bulk ' || n"
+        " FROM generate_series(1, :count) AS n RETURNING id"
+    )
+    with engine.begin() as conn:
+        return sorted(conn.execute(bulk, {"count": count}).scalars())
+
+
+def test_a_resume_that_missed_too_much_starts_over_instead_of_leaving_a_gap(
+    server: Server, clean_db: Engine
+) -> None:
+    seen, *missed = insert_events(clean_db, RESUME_LIMIT + 2)
+    with (
+        client(server) as http,
+        http.stream("GET", "/events/stream", headers={"Last-Event-ID": str(seen)}) as response,
+    ):
+        sse = SSEReader(response.iter_lines())
+        # Resuming would replay only the newest RESUME_LIMIT and hide the oldest missed one,
+        # so the table is reset and refilled as on a first visit.
+        assert sse.next_message()["event"] == "reset"
+        replay = [sse.next_message() for _ in range(REPLAY_LIMIT)]
+        assert [int(m["id"]) for m in replay] == missed[-REPLAY_LIMIT:]
+        status = sse.next_message()
+        assert status["event"] == "status"
+        assert f"missed more than {RESUME_LIMIT} events" in status["data"]
+        assert f"the latest {REPLAY_LIMIT} events" in status["data"]
+
+
+def test_a_resume_of_exactly_the_limit_still_catches_up(server: Server, clean_db: Engine) -> None:
+    seen, *missed = insert_events(clean_db, RESUME_LIMIT + 1)
+    with (
+        client(server) as http,
+        http.stream("GET", "/events/stream", headers={"Last-Event-ID": str(seen)}) as response,
+    ):
+        sse = SSEReader(response.iter_lines())
+        replay = [sse.next_message() for _ in range(RESUME_LIMIT)]
+        assert [(int(m["id"]), m["event"]) for m in replay] == [(i, "ops") for i in missed]
+        status = sse.next_message()
+        assert status["event"] == "status"
+        assert f"caught up {RESUME_LIMIT} missed events" in status["data"]
 
 
 def test_invalid_filters_are_refused_before_streaming(server: Server) -> None:

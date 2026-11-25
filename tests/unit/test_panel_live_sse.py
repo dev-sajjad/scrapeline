@@ -218,6 +218,9 @@ def test_status_is_escaped_html_for_each_situation() -> None:
     assert "No matching events yet" in empty
     assert "latest 1 event;" in stream_status(1, resumed=False)
     assert "caught up 3 missed events" in stream_status(3, resumed=True)
+    restarted = stream_status(50, resumed=True, restarted=True)
+    assert "missed more than 500 events" in restarted and "latest 50 events" in restarted
+    assert "caught up" not in restarted
 
 
 def test_live_feed_macro_builds_an_accessible_stream_url() -> None:
@@ -231,6 +234,25 @@ def test_live_feed_macro_builds_an_accessible_stream_url() -> None:
     assert 'aria-live="polite"' in page and 'role="status"' in page
     assert "<noscript>" in page and 'href="/live?source_id=a+b%26c' in page
     assert "<time" not in page and "No events yet." not in page
+
+
+def test_an_empty_live_feed_has_an_empty_tbody_for_the_css_placeholder() -> None:
+    # `tbody:empty` matches only without any text, whitespace included.
+    page = templates.env.from_string(
+        '{% from "live/_macros.html" import live_feed %}{{ live_feed() }}'
+    ).render()
+    tbody = re.search(r"<tbody[^>]*>(.*?)</tbody>", page, flags=re.S)
+    assert tbody is not None and tbody.group(1) == ""
+    headers = re.findall(r"<th\b[^>]*>", page)
+    assert len(headers) == 4 and all('scope="col"' in th for th in headers)
+
+
+def test_live_feed_table_scrolls_inside_its_wrapper_not_the_page() -> None:
+    # Four columns do not fit a phone; like every panel table it scrolls in a .table-wrap.
+    page = templates.env.from_string(
+        '{% from "live/_macros.html" import live_feed %}{{ live_feed() }}'
+    ).render()
+    assert re.search(r'<div class="table-wrap">\s*<table class="events"', page)
 
 
 def test_live_feed_without_filters_streams_everything() -> None:

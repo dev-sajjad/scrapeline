@@ -11,7 +11,8 @@
 
   The stream first sends `reset`, which empties the table, then replays the latest matching
   events and adds new ones on top as they happen. A browser that reconnects with
-  Last-Event-ID gets only what it missed, without a reset. `initial` is a list of
+  Last-Event-ID gets only what it missed, without a reset, unless it missed too many to
+  replay; then the stream starts over as on a first visit. `initial` is a list of
   (event, data as JSON) pairs, newest first, shown before the stream connects; without
   JavaScript it is all there is. Pages that pass no `initial` link to /live instead.
 #}
@@ -27,6 +28,7 @@
     <p>Live updates need JavaScript. These are the latest events; reload the page to see newer ones.</p>
     {% endif %}
   </noscript>
+  <div class="table-wrap">
   <table class="events" sse-swap="reset" hx-target="find tbody" hx-swap="innerHTML">
     <thead>
       <tr><th scope="col">Time (UTC)</th><th scope="col">Event</th><th scope="col">Source and run</th><th scope="col">Message</th></tr>
@@ -36,8 +38,9 @@
       {%- for event, data_json in initial %}{% include "live/_event_row.html" %}{% else %}
       <tr><td colspan="4" class="empty">No events yet.</td></tr>
       {%- endfor %}
-      {%- endif %}
+      {%- endif -%}
     </tbody>
   </table>
+  </div>
 </section>
 {%- endmacro %}

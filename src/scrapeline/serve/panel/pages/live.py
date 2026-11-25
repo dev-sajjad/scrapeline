@@ -30,7 +30,8 @@ from scrapeline.store import tables as t
 router = APIRouter()
 
 REPLAY_LIMIT = 50
-# A browser that reconnects with Last-Event-ID gets at most this many missed events back.
+# A browser that reconnects with Last-Event-ID gets at most this many missed events back;
+# one that missed more starts over with the latest REPLAY_LIMIT, so its table has no gap.
 RESUME_LIMIT = 500
 SOURCE_CHOICES = 500
 KIND_SUGGESTIONS = (
@@ -78,11 +79,20 @@ def render_event_row(event: StoredEvent) -> str:
     return template.render(event=event, data_json=data_json(event))
 
 
-def stream_status(replayed: int, *, resumed: bool) -> str:
-    """The line above a live feed once the stream has replayed what it had, as HTML."""
+def stream_status(replayed: int, *, resumed: bool, restarted: bool = False) -> str:
+    """The line above a live feed once the stream has replayed what it had, as HTML.
+
+    `restarted`: the browser reconnected after missing more than RESUME_LIMIT events, so the
+    table was emptied and shows the latest `replayed` events instead.
+    """
     now = datetime.now(UTC).strftime("%H:%M:%S")
     events = "event" if replayed == 1 else "events"
-    if resumed:
+    if restarted:
+        text = (
+            f"Reconnected at {now} UTC, but missed more than {RESUME_LIMIT} events. "
+            f"Showing the latest {replayed} {events}; new ones go on top."
+        )
+    elif resumed:
         text = f"Reconnected at {now} UTC and caught up {replayed} missed {events}."
     elif replayed:
         text = f"Live since {now} UTC. Showing the latest {replayed} {events}; new ones go on top."
@@ -106,7 +116,8 @@ def _recent(
 
 
 def _replay(engine: Engine, wanted: EventFilter, resume_after: int | None) -> list[StoredEvent]:
-    limit = REPLAY_LIMIT if resume_after is None else RESUME_LIMIT
+    # One more than a resume sends tells whether the browser missed more than that.
+    limit = REPLAY_LIMIT if resume_after is None else RESUME_LIMIT + 1
     with engine.connect() as conn:
         return _recent(conn, wanted, resume_after, limit)
 
@@ -155,12 +166,17 @@ async def stream_events(
         hub.unsubscribe(subscription)
         raise
     resumed = resume_after is not None
+    # Replaying only the newest of too many missed events would leave a silent gap.
+    restarted = resumed and len(replay) > RESUME_LIMIT
+    if restarted:
+        replay = replay[-REPLAY_LIMIT:]
     body = event_stream(
         subscription,
         replay,
         render_event_row,
-        reset=not resumed,  # a resuming browser keeps its rows and gets only what it missed
-        status=stream_status(len(replay), resumed=resumed),
+        # A resuming browser keeps its rows and gets only what it missed.
+        reset=not resumed or restarted,
+        status=stream_status(len(replay), resumed=resumed, restarted=restarted),
     )
     return EventStreamResponse(body, release=partial(hub.unsubscribe, subscription))
 
