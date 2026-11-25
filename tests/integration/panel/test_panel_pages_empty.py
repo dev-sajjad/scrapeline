@@ -69,6 +69,7 @@ def add_run(
     started: datetime = NOW,
     kind: str = "incremental",
     error: str | None = None,
+    stats: dict[str, Any] | None = None,
 ) -> uuid.UUID:
     run_id = uuid.uuid4()
     conn.execute(
@@ -79,7 +80,7 @@ def add_run(
             status=status,
             started_at=started,
             finished_at=started + timedelta(seconds=2),
-            stats={"pages": 1, "records": {"product": 3}},
+            stats={"pages": 1, "records": {"product": 3}} if stats is None else stats,
             error=error,
         )
     )
@@ -314,3 +315,27 @@ def test_personal_data_row_follows_the_record_store(
     tree = HTMLParser(client.get("/sources/pii").text)
     row = next(pair for pair in tree.css("dl.kv > div") if text_of(pair, "dt") == "Personal data")
     assert text_of(row, "dd") == shown
+
+
+def test_health_shows_records_loaded_not_parsed(client: TestClient, clean_db: Engine) -> None:
+    with clean_db.begin() as conn:
+        # Parsed 20, but the load rolled back, so nothing was stored.
+        add_source(conn, "rolled-back")
+        rolled_back = {"pages": 1, "records": {"product": 20}, "loaded": {}}
+        add_run(conn, "rolled-back", status="failed", error="IntegrityError", stats=rolled_back)
+        add_source(conn, "loaded")
+        loaded = {"product": {"inserted": 2, "updated": 3, "unchanged": 10, "removed": 4}}
+        add_run(conn, "loaded", stats={"records": {"product": 15}, "loaded": loaded})
+        add_source(conn, "still-running")
+        add_run(conn, "still-running", status="running", stats={})
+    tree = HTMLParser(client.get("/").text)
+    headers = [" ".join(th.text().split()) for th in tree.css("thead th")]
+    column = headers.index("Loaded in last run")
+    for source_id, expected in (("rolled-back", "0"), ("loaded", "15"), ("still-running", "—")):
+        row = next(
+            row
+            for row in tree.css("tbody tr")
+            if row.css_first(f'a[href="/sources/{source_id}"]') is not None
+        )
+        cells = row.css("th, td")
+        assert cells[column].text().strip() == expected, source_id

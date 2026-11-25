@@ -41,7 +41,7 @@
       <th scope="col">Status</th>
       <th scope="col">Cadence</th>
       <th scope="col">Last run</th>
-      <th scope="col" class="num">Records in last run</th>
+      <th scope="col" class="num">Loaded in last run</th>
       <th scope="col" class="num">Open incidents</th>
     </tr>
   </thead>
@@ -52,7 +52,7 @@
       <td>{{ badge(row.status) }} {{ attention_flags(row.attention) }}</td>
       <td>{{ row.cadence }}</td>
       <td class="nowrap">{{ last_run_cell(row.last_run) }}</td>
-      <td class="num">{% if row.last_run %}{{ row.last_run.records | number }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num">{% if row.last_run %}{{ row.last_run.loaded | number }}{% else %}<span class="muted">—</span>{% endif %}</td>
       <td class="num">{% if row.open_incidents %}<a href="/incidents?source_id={{ row.id | urlencode }}">{{ row.open_incidents | number }}</a>{% else %}0{% endif %}</td>
     </tr>
     {% endfor %}

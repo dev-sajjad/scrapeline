@@ -18,6 +18,7 @@ from scrapeline.serve.panel.pages.sources import (
     config_view,
     is_overdue,
     personal_data,
+    records_loaded,
 )
 
 NOW = datetime(2026, 11, 25, 12, 0, tzinfo=UTC)
@@ -131,6 +132,18 @@ def test_config_view_flags_the_placeholder_review_date() -> None:
 def test_personal_data_follows_the_record_store_rule(usage: object, expected: str) -> None:
     assert personal_data(usage) == expected
     assert config_view({"usage": usage})["personal_data"] == expected
+
+
+def test_records_loaded_counts_what_the_load_stored() -> None:
+    loaded = {
+        "product": {"inserted": 1, "updated": 8, "unchanged": 11, "restored": 2, "removed": 5},
+        "meeting": {"inserted": 25},
+        "junk": 3,
+    }
+    assert records_loaded(loaded) == 47  # removed records are not stored ones
+    assert records_loaded({}) == 0  # a load that rolled back
+    assert records_loaded(None) is None  # a run still going
+    assert records_loaded({"product": {"inserted": "3", "updated": None}}) == 0
 
 
 def test_load_rows_skip_malformed_stats() -> None:

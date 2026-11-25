@@ -28,6 +28,8 @@ DEFAULT_CADENCE = str(SourceConfig.model_fields["cadence"].default)
 OVERDUE_GRACE = 0.5
 DETAIL_ROWS = 20
 CHOICES_LIMIT = 500
+# Load counts of records a run left stored; removed records are not among them.
+STORED_COUNTS = ("inserted", "updated", "unchanged", "restored")
 
 
 def is_overdue(status: str, cadence: str, last_started: datetime | None, now: datetime) -> bool:
@@ -70,7 +72,7 @@ def last_runs(conn: Connection, source_ids: Collection[str]) -> dict[str, Mappin
             r.c.started_at,
             r.c.finished_at,
             r.c.error,
-            r.c.stats["records"].label("records"),
+            r.c.stats["loaded"].label("loaded"),
         )
         .where(r.c.source_id.in_(source_ids))
         .ext(distinct_on(r.c.source_id))
@@ -85,13 +87,28 @@ def last_runs(conn: Connection, source_ids: Collection[str]) -> dict[str, Mappin
     )
     result: dict[str, Mapping[str, Any]] = {}
     for row in newest:
-        records = row["records"] if isinstance(row["records"], Mapping) else {}
         result[row["source_id"]] = {
             **row,
-            "records": sum(v for v in records.values() if isinstance(v, int)),
+            "loaded": records_loaded(row["loaded"]),
             "last_scheduled": scheduled.get(row["source_id"]),
         }
     return result
+
+
+def records_loaded(loaded: object) -> int | None:
+    """Records a run stored, summed over its datasets; None while the run has no load stats.
+
+    Parsed counts are not used: a load that rolls back keeps them but stores nothing.
+    """
+    if not isinstance(loaded, Mapping):
+        return None
+    total = 0
+    for counts in loaded.values():
+        if not isinstance(counts, Mapping):
+            continue
+        values = (counts.get(key) for key in STORED_COUNTS)
+        total += sum(n for n in values if isinstance(n, int))
+    return total
 
 
 def record_counts(conn: Connection, source_ids: Collection[str]) -> dict[str, int]:
