@@ -200,8 +200,7 @@ del { color: var(--bad); }
 ins { color: var(--ok); text-decoration: none; }
 del a, ins a { color: inherit; }
 
-/* The live feed table comes from the live macros; it shares the table look. */
-.live-feed { overflow-x: auto; }
+/* The live feed table comes from the live macros; its .table-wrap scrolls it on phones. */
 .live-status { color: var(--muted); font-size: 13px; }
 .live-status p { margin: 0 0 6px; }
 table.events time { white-space: nowrap; }
