@@ -164,8 +164,9 @@ Upgrade process: SDK or framework major bump = branch, run `tests/unit/test_llm_
 | 0002 | `jurisdictions`, `bodies` (council, committee, board), `meetings`, `agenda_items`, `documents`, `pipeline.rejects` |
 | 0003 | `ops.check_result`, `ops.incident`, `ops.metric_daily` |
 | 0004 | `ops.agent_run`, `ops.agent_tool_call`, `evals.run`, `evals.case_result` |
-| 0006 | `raw.fetch_log.created_at` (database-set ingest time; lake export uses the exact cutoff rule) |
 | 0005 | `catalog.site_category` (seeded, taxonomy v1), `catalog.site`, `catalog.classification_log`, `catalog.dataset_type`, `data.records`, `data.record_versions`, `ops.event`; `sources.site_id`, `sources.dataset` |
+| 0006 | `raw.fetch_log.created_at` (database-set ingest time; lake export uses the exact cutoff rule) |
+| 0007 | Indexes for lookups by run (`fetch_log`, `rejects`, `check_result`), by source (`ops.run`) and by raw file (`fetch_log`, `records`, `record_versions`) |
 
 Nothing may be read from a table that has no migration yet.
 

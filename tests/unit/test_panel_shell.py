@@ -43,6 +43,17 @@ def test_unknown_host_is_refused(client: TestClient) -> None:
     assert response.status_code == 400
 
 
+@pytest.mark.parametrize("url", ["/sources?q=%00", "/runs?source_id=a%00b", "/sources/%00"])
+def test_nul_bytes_in_the_url_are_refused_before_any_query(client: TestClient, url: str) -> None:
+    response = client.get(url)
+    assert response.status_code == 400
+    assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_huge_offsets_are_refused_before_any_query(client: TestClient) -> None:
+    assert client.get("/runs", params={"offset": 10**20}).status_code == 422
+
+
 def test_static_assets_are_served(client: TestClient) -> None:
     assert client.get("/static/panel.css").status_code == 200
     htmx = client.get("/static/vendor/htmx-2.0.4.min.js")

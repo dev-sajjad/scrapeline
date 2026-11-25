@@ -60,7 +60,8 @@ services:
     <<: *app
     profiles: ["panel", "prod"]
     entrypoint: ["uvicorn"]
-    command: ["scrapeline.serve.panel.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+    # Open live streams end after 3 s on shutdown instead of holding the stop until SIGKILL.
+    command: ["scrapeline.serve.panel.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "3"]
     ports: ["127.0.0.1:8000:8000"]
     volumes: ["./data:/data:ro"]
     depends_on:

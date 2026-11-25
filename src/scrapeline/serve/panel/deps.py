@@ -54,6 +54,10 @@ EngineDep = Annotated[Engine, Depends(current_engine)]
 SettingsDep = Annotated[Settings, Depends(current_settings)]
 
 
+# Far deeper than anyone pages; keeps huge offsets (beyond bigint) from reaching Postgres.
+MAX_OFFSET = 1_000_000
+
+
 @dataclass(frozen=True)
 class Page:
     """Offset paging for list pages."""
@@ -71,7 +75,7 @@ class Page:
 
 def page_params(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=MAX_OFFSET)] = 0,
 ) -> Page:
     return Page(limit, offset)
 

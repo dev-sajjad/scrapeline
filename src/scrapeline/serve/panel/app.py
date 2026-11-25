@@ -70,6 +70,22 @@ class SecurityHeaders:
         await self.app(scope, receive, send_with_headers)
 
 
+class RejectNulBytes:
+    """Answers 400 to a URL containing a NUL byte: Postgres rejects NUL in text parameters."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and ("\x00" in scope["path"] or b"%00" in scope["query_string"]):
+            response = PlainTextResponse(
+                "Bad request: the URL contains a NUL byte.", status_code=400
+            )
+            await response(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+
 def page_routers() -> list[APIRouter]:
     """The router of every module in `pages/`, in module name order."""
     names = sorted(info.name for info in pkgutil.iter_modules(pages.__path__))
@@ -95,6 +111,8 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
     app.state.settings = settings
     app.state.engine = engine or get_engine(settings.database_url)
 
+    # Starlette runs the last added middleware first: host check, headers, then the NUL check.
+    app.add_middleware(RejectNulBytes)
     app.add_middleware(SecurityHeaders)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.panel_allowed_hosts)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

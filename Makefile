@@ -16,7 +16,7 @@ down:
 	docker compose --profile panel --profile prod down
 
 panel:          ## control panel from this checkout on http://localhost:8000, reloads on change
-	uv run uvicorn scrapeline.serve.panel.app:create_app --factory --port 8000 --reload
+	uv run uvicorn scrapeline.serve.panel.app:create_app --factory --port 8000 --reload --timeout-graceful-shutdown 3
 
 image:          ## build the app/worker image (Playwright base)
 	docker compose --profile app build app
