@@ -6,7 +6,7 @@
 {%- elif c.full -%}
 <span title="{{ c.full }}">{{ c.text }}</span>
 {%- elif c.empty -%}
-<span class="empty">{{ c.text }}</span>
+<span class="muted">{{ c.text }}</span>
 {%- else -%}
 {{ c.text }}
 {%- endif -%}
@@ -29,9 +29,9 @@
 {%- endmacro %}
 
 {% macro raw_link(sha) -%}
-{%- if sha -%}<a class="mono" href="/storage/raw/{{ sha }}">{{ sha | short }}</a>{%- else -%}<span class="empty">—</span>{%- endif -%}
+{%- if sha -%}<a class="mono" href="/storage/raw/{{ sha }}">{{ sha | short }}</a>{%- else -%}<span class="muted">—</span>{%- endif -%}
 {%- endmacro %}
 
 {% macro run_link(run_id) -%}
-{%- if run_id -%}<a class="mono" href="/runs/{{ run_id }}">{{ run_id | short(8) }}</a>{%- else -%}<span class="empty">—</span>{%- endif -%}
+{%- if run_id -%}<a class="mono" href="/runs/{{ run_id }}">{{ run_id | short(8) }}</a>{%- else -%}<span class="muted">—</span>{%- endif -%}
 {%- endmacro %}

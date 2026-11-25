@@ -397,7 +397,7 @@ def test_unknown_stock_is_not_shown_as_out_of_stock(warehouse: Path) -> None:
     add_history(warehouse, _product(6, "SIM-0009", "Teapot", teapot))
     body = main(client_for(warehouse).get("/marts/price-history/shop/SIM-0009").text)
     stock = body.split("<h2>Stock changes</h2>", 1)[1].split("<h2>", 1)[0]
-    unknown = '<span class="empty">—</span>'
+    unknown = '<span class="muted">—</span>'
     assert re.findall(r"<td>(.*?)</td>", stock) == [f"yes → {unknown}", f"{unknown} → yes"]
     versions = body.split("<h2>Versions</h2>", 1)[1]
     assert "<td>no</td>" not in versions and versions.count(f"<td>{unknown}</td>") == 2
@@ -493,6 +493,14 @@ MART_PAGES = (
     "/marts/price-history/shop/SIM-0002",
     "/marts/scraper-health",
 )
+
+
+@pytest.mark.parametrize("path", MART_PAGES)
+def test_mart_pages_use_the_shell_layout(client: TestClient, path: str) -> None:
+    # Tables scroll in the shell's wrapper on a phone; `.empty` is only the empty-state box.
+    body = main(client.get(path).text)
+    assert body.count("<table") == body.count('<div class="table-wrap">\n<table') > 0
+    assert '<span class="empty"' not in body and "<caption" not in body
 
 
 @pytest.mark.parametrize("path", MART_PAGES)

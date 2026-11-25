@@ -13,7 +13,7 @@
   {% if product.url and product.url.lower().startswith(("http://", "https://")) %}· <a href="{{ product.url }}" rel="noopener noreferrer nofollow">product page</a>{% endif %}
 </p>
 {% if total_versions > history | length %}
-<p class="empty">{{ total_versions | number }} versions in all; the chart and tables show the latest {{ history | length | number }}.</p>
+<p class="muted">{{ total_versions | number }} versions in all; the chart and tables show the latest {{ history | length | number }}.</p>
 {% endif %}
 
 <h2>Price over time</h2>
@@ -25,6 +25,7 @@
 
 <h2>Stock changes</h2>
 {% if stock_changes %}
+<div class="table-wrap">
 <table>
   <thead>
     <tr>
@@ -43,11 +44,13 @@
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% else %}
 {{ empty("Stock availability has not changed.") }}
 {% endif %}
 
 <h2>Versions</h2>
+<div class="table-wrap">
 <table>
   <thead>
     <tr>
@@ -68,7 +71,7 @@
       <th scope="row" class="num">{{ row.version }}</th>
       <td>{{ dm.change(row.change_type) }}</td>
       <td>{{ row.valid_from | dt }}</td>
-      <td>{% if row.valid_to %}{{ row.valid_to | dt }}{% else %}<span class="empty">{{ "still removed" if row.is_removed else "current" }}</span>{% endif %}</td>
+      <td>{% if row.valid_to %}{{ row.valid_to | dt }}{% else %}<span class="muted">{{ "still removed" if row.is_removed else "current" }}</span>{% endif %}</td>
       <td class="num">{{ row.new }}</td>
       <td class="num">{{ row.change }}</td>
       <td class="num">{{ row.change_pct }}</td>
@@ -78,4 +81,5 @@
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% endblock %}

@@ -152,6 +152,34 @@ def test_unknown_raw_objects_are_not_found(client: TestClient, sha: str) -> None
     assert client.get(f"/storage/raw/{sha}/download").status_code == 404
 
 
+def assert_fits_a_phone(html: str) -> None:
+    """Tables scroll in the shell's wrapper, and `.empty` is only the empty-state box."""
+    body = main(html)
+    assert body.count("<table") == body.count('<div class="table-wrap">\n<table'), body
+    assert '<span class="empty"' not in body and "<caption" not in body
+
+
+def test_data_and_storage_pages_use_the_shell_layout(client: TestClient, seeded: Seeded) -> None:
+    day3 = fetch_of(seeded, "/day-3/")
+    with seeded.engine.connect() as conn:
+        lamp = conn.execute(
+            select(t.records.c.id).where(t.records.c.external_id == "SIM-0007")
+        ).scalar_one()
+        meeting = conn.execute(select(func.min(t.meetings.c.id))).scalar_one()
+    for path in (
+        "/data",
+        "/data/product",
+        f"/data/product/{lamp}",
+        "/data/meeting",
+        f"/data/meeting/{meeting}",
+        "/storage",
+        f"/storage/raw/{day3.raw_sha256}",
+    ):
+        page = client.get(path)
+        assert page.status_code == 200, path
+        assert_fits_a_phone(page.text)
+
+
 def test_storage_pages_use_a_fixed_number_of_queries(client: TestClient, seeded: Seeded) -> None:
     day3 = fetch_of(seeded, "/day-3/")
     for path in ("/storage", f"/storage/raw/{day3.raw_sha256}"):

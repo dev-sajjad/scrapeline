@@ -1,4 +1,4 @@
 {# Stock is three-valued: an unparsed availability is unknown, not out of stock. #}
 {% macro in_stock(value) -%}
-{%- if value is none -%}<span class="empty">—</span>{%- elif value -%}yes{%- else -%}no{%- endif -%}
+{%- if value is none -%}<span class="muted">—</span>{%- elif value -%}yes{%- else -%}no{%- endif -%}
 {%- endmacro %}

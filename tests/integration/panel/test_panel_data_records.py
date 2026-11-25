@@ -177,7 +177,7 @@ def test_desk_lamp_lineage_shows_removal_and_restore(client: TestClient, seeded:
     # valid_to is the next version's valid_from; the newest is still current.
     assert f"<td>{filters.dt(stored[1].valid_from)}</td>" in rows[2]
     assert f"<td>{filters.dt(stored[2].valid_from)}</td>" in rows[1]
-    assert '<span class="empty">current</span>' in rows[0]
+    assert '<span class="muted">current</span>' in rows[0]
     assert "a removal has no values" in rows[1]
     assert "No field changes since version 1." in rows[0]
     for row, run in zip(rows, reversed(seeded.shop_runs), strict=True):
