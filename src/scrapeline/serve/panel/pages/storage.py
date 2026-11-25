@@ -111,16 +111,20 @@ def _check_sha(sha256: str) -> None:
 
 
 def _raw_store_by_source(conn: Connection) -> list[Any]:
-    """Distinct raw objects and their bytes per source, with the last fetch of any kind."""
+    """Raw files and their bytes per source, with the last fetch of any kind.
+
+    A file is a distinct raw key, not a distinct hash: the key holds the fetch date, so the
+    same bytes fetched on another day are a second file on disk.
+    """
     f = t.fetch_log
     objects = (
         select(
             f.c.source_id,
-            f.c.raw_sha256,
+            f.c.raw_key,
             func.max(f.c.nbytes).label("nbytes"),
         )
-        .where(f.c.raw_sha256.is_not(None))
-        .group_by(f.c.source_id, f.c.raw_sha256)
+        .where(f.c.raw_key.is_not(None))
+        .group_by(f.c.source_id, f.c.raw_key)
         .subquery()
     )
     stored = (
