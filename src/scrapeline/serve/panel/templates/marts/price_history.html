@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge, empty %}
+{% block content %}
+<nav aria-label="Breadcrumb"><a href="/marts">Marts</a> / price history</nav>
+<h1>Price history</h1>
+<p>How prices and stock change over time, from the <code>product_price_history</code> mart.
+Each version is compared with the last observed one before it.</p>
+
+<form method="get" action="/marts/price-history" role="search" aria-label="Filter products">
+  <label for="source_id">Source</label>
+  <select id="source_id" name="source_id">
+    <option value="">All sources</option>
+    {% for option in sources %}
+    <option value="{{ option }}"{% if option == filters.source_id %} selected{% endif %}>{{ option }}</option>
+    {% endfor %}
+  </select>
+  <label for="q">Product</label>
+  <input id="q" name="q" type="search" value="{{ filters.q }}" maxlength="100" placeholder="Title or id">
+  <button type="submit">Filter</button>
+  <a href="/marts/price-history">Reset</a>
+</form>
+
+<h2>Biggest movers</h2>
+{% if movers %}
+<table>
+  <caption class="empty">First observed price against the latest one, largest change first.</caption>
+  <thead>
+    <tr>
+      <th scope="col">Product</th>
+      <th scope="col">Source</th>
+      <th scope="col" class="num">First</th>
+      <th scope="col" class="num">Latest</th>
+      <th scope="col" class="num">Change</th>
+      <th scope="col" class="num">%</th>
+      <th scope="col">Last change</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in movers %}
+    <tr>
+      <th scope="row"><a href="{{ row.href }}">{{ row.title or row.external_id }}</a></th>
+      <td>{{ row.source_id }}</td>
+      <td class="num">{{ row.old }}</td>
+      <td class="num">{{ row.new }}</td>
+      <td class="num">{{ row.change }}</td>
+      <td class="num">{{ row.change_pct }}</td>
+      <td>{{ row.last_change | dt }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+{{ empty("No price movements to show.") }}
+{% endif %}
+
+<h2>Latest price changes</h2>
+{% if changes %}
+<table>
+  <thead>
+    <tr>
+      <th scope="col">When</th>
+      <th scope="col">Product</th>
+      <th scope="col">Source</th>
+      <th scope="col" class="num">Old</th>
+      <th scope="col" class="num">New</th>
+      <th scope="col" class="num">Change</th>
+      <th scope="col" class="num">%</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in changes %}
+    <tr>
+      <td>{{ row.valid_from | dt }}</td>
+      <th scope="row"><a href="{{ row.href }}">{{ row.title or row.external_id }}</a></th>
+      <td>{{ row.source_id }}</td>
+      <td class="num">{{ row.old }}</td>
+      <td class="num">{{ row.new }}</td>
+      <td class="num">{{ row.change }}</td>
+      <td class="num">{{ row.change_pct }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+{{ empty("No price changes match.") }}
+{% endif %}
+
+<h2>Products</h2>
+{% if products %}
+<table>
+  <thead>
+    <tr>
+      <th scope="col">Product</th>
+      <th scope="col">Source</th>
+      <th scope="col" class="num">Price</th>
+      <th scope="col">In stock</th>
+      <th scope="col">Since</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in products %}
+    <tr>
+      <th scope="row"><a href="{{ row.href }}">{{ row.title or row.external_id }}</a>{% if row.is_removed %} {{ badge("removed") }}{% endif %}</th>
+      <td>{{ row.source_id }}</td>
+      <td class="num">{{ row.price }}</td>
+      <td>{% if row.in_stock is none %}<span class="empty">—</span>{% elif row.in_stock %}yes{% else %}no{% endif %}</td>
+      <td>{{ row.valid_from | dt }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% if more_products %}<p class="empty">Only the first {{ products | length }} are listed; filter to narrow them down.</p>{% endif %}
+{% else %}
+{{ empty("No products match.") }}
+{% endif %}
+{% endblock %}
