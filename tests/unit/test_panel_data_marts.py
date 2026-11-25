@@ -425,6 +425,29 @@ def test_a_complete_history_has_no_truncation_note(client: TestClient) -> None:
     assert "versions in all" not in client.get("/marts/price-history/shop/SIM-0002").text
 
 
+def test_movers_search_compares_a_renamed_products_first_and_latest_price(
+    warehouse: Path,
+) -> None:
+    mug = _product(
+        8,
+        "SIM-0011",
+        "Mug",
+        [("insert", "10.00", True), ("update", "8.00", True), ("update", "7.00", True)],
+    )
+    add_history(warehouse, retitled(mug, "Mug", "Mug (sale)", "Mug (sale)"))
+    client = client_for(warehouse)
+    body = main(client.get("/marts/price-history", params={"q": "sale"}).text)
+    movers = body.split("<h2>Biggest movers</h2>", 1)[1].split("<h2>", 1)[0]
+    # 10.00 -> 7.00, not 8.00 -> 7.00 from only the versions whose title says "sale".
+    assert '<td class="num">10.00 GBP</td>' in movers and "8.00 GBP" not in movers
+    assert MINUS + "3.00" in movers and MINUS + "30.0%" in movers
+    # The search matches the product's current title, as the product list does.
+    body = main(client.get("/marts/price-history", params={"q": "Mug"}).text)
+    assert "Mug (sale)" in body.split("<h2>Biggest movers</h2>", 1)[1].split("<h2>", 1)[0]
+    body = main(client.get("/marts/price-history", params={"q": "SIM-0011"}).text)
+    assert "Mug (sale)" in body.split("<h2>Biggest movers</h2>", 1)[1].split("<h2>", 1)[0]
+
+
 def test_product_ids_that_are_urls_work(client: TestClient) -> None:
     page = client.get(product_href("shop", URL_ID))
     assert page.status_code == 200

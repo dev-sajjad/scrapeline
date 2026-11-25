@@ -141,6 +141,8 @@ LATEST_CHANGES_SQL = (
     + _PRODUCT_FILTERS
     + " order by valid_from desc, version_id desc limit $limit"
 )
+# The text filter applies to each product's latest title, after aggregating all its versions:
+# filtering versions first would compare prices from the matching titles only.
 MOVERS_SQL = """
 with observed as (
     select record_id, source_id, external_id, title, version, valid_from,
@@ -148,7 +150,6 @@ with observed as (
     from product_price_history
     where not is_removed and price_amount is not null
       and ($source is null or source_id = $source)
-      and ($q is null or title ilike $q escape '\\' or external_id ilike $q escape '\\')
 ),
 products as (
     select
@@ -168,6 +169,7 @@ select
     round(100 * (last_amount - first_amount) / nullif(first_amount, 0), 2) as change_pct
 from products
 where first_currency = last_currency and first_amount <> last_amount
+  and ($q is null or title ilike $q escape '\\' or external_id ilike $q escape '\\')
 order by abs(change_pct) desc nulls last, last_change desc
 limit $limit
 """
