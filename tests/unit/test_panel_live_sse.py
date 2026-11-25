@@ -247,6 +247,14 @@ def test_an_empty_live_feed_has_an_empty_tbody_for_the_css_placeholder() -> None
     assert len(headers) == 4 and all('scope="col"' in th for th in headers)
 
 
+def test_live_feed_table_scrolls_inside_its_wrapper_not_the_page() -> None:
+    # Four columns do not fit a phone; like every panel table it scrolls in a .table-wrap.
+    page = templates.env.from_string(
+        '{% from "live/_macros.html" import live_feed %}{{ live_feed() }}'
+    ).render()
+    assert re.search(r'<div class="table-wrap">\s*<table class="events"', page)
+
+
 def test_live_feed_without_filters_streams_everything() -> None:
     page = templates.env.from_string(
         '{% from "live/_macros.html" import live_feed %}{{ live_feed() }}'
