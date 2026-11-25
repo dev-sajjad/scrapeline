@@ -56,6 +56,7 @@ def test_huge_offsets_are_refused_before_any_query(client: TestClient) -> None:
 
 def test_static_assets_are_served(client: TestClient) -> None:
     assert client.get("/static/panel.css").status_code == 200
+    assert client.get("/static/favicon.svg").headers["content-type"].startswith("image/svg+xml")
     htmx = client.get("/static/vendor/htmx-2.0.4.min.js")
     assert htmx.status_code == 200 and "htmx" in htmx.text
 

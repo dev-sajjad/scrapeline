@@ -108,14 +108,20 @@ def test_inline_empty_text_is_only_muted(browser: Browser, base_url: str, seeded
     """`.empty` marks both empty-state boxes and muted words inside tables and headings."""
     page = browser.new_page(viewport={"width": 1280, "height": 800})
     try:
+        # Probe the stylesheet with an inline .empty in a real table cell, so the test does
+        # not depend on which page currently renders one.
         page.goto(base_url + "/data/product")
         inline = page.evaluate(
-            """() => [...document.querySelectorAll('span.empty')].map(e => {
-                const s = getComputedStyle(e);
+            """() => {
+                const span = document.createElement('span');
+                span.className = 'empty';
+                span.textContent = 'none';
+                document.querySelector('main tbody td').append(span);
+                const s = getComputedStyle(span);
                 return [s.borderTopStyle, s.paddingTop];
-            })"""
+            }"""
         )
-        assert inline and all(style == ["none", "0px"] for style in inline)
+        assert inline == ["none", "0px"]
         page.goto(base_url + "/incidents?status=closed")
         box = page.evaluate("getComputedStyle(document.querySelector('p.empty')).borderTopStyle")
         assert box == "dashed"
