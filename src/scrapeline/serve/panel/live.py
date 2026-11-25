@@ -148,6 +148,9 @@ class EventHub:
             await asyncio.wait_for(self._listening.wait(), self.ready_timeout)
         except TimeoutError:
             raise LiveUnavailableError("cannot listen for events on the database") from None
+        # stop() may have run while this one waited; nothing would ever close its subscription.
+        if self._stopped:
+            raise LiveUnavailableError("the panel is shutting down")
         self._check_capacity()  # others may have joined while this one waited
         subscription = Subscription(event_filter, self.queue_size)
         self._subscribers.add(subscription)

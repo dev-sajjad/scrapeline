@@ -225,6 +225,22 @@ async def test_stop_closes_everything_and_refuses_new_subscribers(unreachable: E
 
 
 @pytest.mark.anyio
+async def test_a_subscriber_still_waiting_for_listen_is_refused_once_the_hub_stops(
+    unreachable: Engine,
+) -> None:
+    hub = OfflineHub(unreachable)
+    waiting = asyncio.ensure_future(hub.subscribe(EventFilter()))
+    await asyncio.sleep(0)  # subscribe starts the hub and waits for LISTEN
+    assert not waiting.done() and hub._task is not None
+    # The hub starts listening, which wakes the subscriber, but stop() runs before it resumes.
+    stopping = asyncio.ensure_future(hub.stop())
+    with pytest.raises(LiveUnavailableError):
+        await waiting
+    await stopping
+    assert hub.subscriber_count == 0
+
+
+@pytest.mark.anyio
 async def test_hub_without_a_database_is_unavailable_not_stuck(unreachable: Engine) -> None:
     hub = EventHub(unreachable, ready_timeout=0.3, backoff=(0.05, 0.1))
     with pytest.raises(LiveUnavailableError):
