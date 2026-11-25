@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +24,9 @@ router = APIRouter()
 SOURCES_CHECKED = 500
 SOURCES_SHOWN = 25
 INCIDENTS_SHOWN = 5
+# Dead jobs stay in the queue table for good, so only recent ones say something is wrong now.
+FAILED_HOURS = 24
+FAILED_WINDOW = timedelta(hours=FAILED_HOURS)
 
 
 @dataclass(frozen=True)
@@ -57,7 +60,11 @@ def lake_freshness(lake_dir: Path) -> LakeFreshness:
 
 
 def job_queue(conn: Connection) -> dict[str, Any]:
-    """Queue counts in one pass. A running job whose lease has passed has stalled."""
+    """Queue counts in one pass.
+
+    A running job whose lease has passed has stalled. `failed` counts jobs dead-lettered
+    within FAILED_WINDOW (their last update is the dead-lettering); `failed_total` counts all.
+    """
     j = t.job
     row = conn.execute(
         select(
@@ -66,7 +73,10 @@ def job_queue(conn: Connection) -> dict[str, Any]:
             func.count()
             .filter(and_(j.c.status == "running", j.c.lease_until < func.now()))
             .label("stalled"),
-            func.count().filter(j.c.status == "dead").label("failed"),
+            func.count()
+            .filter(and_(j.c.status == "dead", j.c.updated_at > func.now() - FAILED_WINDOW))
+            .label("failed"),
+            func.count().filter(j.c.status == "dead").label("failed_total"),
             func.min(j.c.created_at).filter(j.c.status == "queued").label("oldest_queued"),
         )
     ).mappings()
@@ -80,8 +90,8 @@ def _counted(n: int, noun: str) -> str:
 def verdict(flagged: int, queue: dict[str, Any], open_incidents: int) -> tuple[str, list[str]]:
     """The overall state ('ok', 'attention' or 'bad') and the problems behind it.
 
-    Failing sources and stuck or dead jobs mean scraping is not happening ('bad'); open
-    incidents alone are known problems someone may already be handling ('attention').
+    Failing sources and stuck or recently dead jobs mean scraping is not happening ('bad');
+    open incidents alone are known problems someone may already be handling ('attention').
     """
     problems = []
     if flagged:
@@ -90,7 +100,7 @@ def verdict(flagged: int, queue: dict[str, Any], open_incidents: int) -> tuple[s
     if queue["stalled"]:
         problems.append(_counted(queue["stalled"], "stalled job"))
     if queue["failed"]:
-        problems.append(_counted(queue["failed"], "failed job"))
+        problems.append(f"{_counted(queue['failed'], 'failed job')} in the last {FAILED_HOURS} h")
     if open_incidents:
         problems.append(_counted(open_incidents, "open incident"))
     if not problems:
@@ -137,6 +147,7 @@ def health(request: Request, engine: EngineDep, settings: SettingsDep) -> HTMLRe
             "state": state,
             "problems": problems,
             "queue": queue,
+            "failed_hours": FAILED_HOURS,
             "by_status": [(status, by_status.get(status, 0)) for status in STATUSES]
             + [(status, n) for status, n in sorted(by_status.items()) if status not in STATUSES],
             "total_sources": total_sources,

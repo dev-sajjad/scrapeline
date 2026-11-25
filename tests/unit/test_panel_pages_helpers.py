@@ -16,7 +16,14 @@ from scrapeline.serve.panel.pages.runs import load_rows
 from scrapeline.serve.panel.pages.sources import attention, config_view, is_overdue
 
 NOW = datetime(2026, 11, 25, 12, 0, tzinfo=UTC)
-QUIET = {"queued": 0, "running": 0, "stalled": 0, "failed": 0, "oldest_queued": None}
+QUIET = {
+    "queued": 0,
+    "running": 0,
+    "stalled": 0,
+    "failed": 0,
+    "failed_total": 0,
+    "oldest_queued": None,
+}
 
 
 def render(source: str, **context: object) -> str:
@@ -66,10 +73,14 @@ def test_verdict_separates_known_problems_from_broken_scraping() -> None:
     assert problems == [
         "2 sources need attention",
         "1 stalled job",
-        "3 failed jobs",
+        "3 failed jobs in the last 24 h",
         "2 open incidents",
     ]
     assert verdict(1, QUIET, 0)[1] == ["1 source needs attention"]
+
+
+def test_jobs_that_died_long_ago_do_not_spoil_the_verdict() -> None:
+    assert verdict(0, {**QUIET, "failed_total": 7}, 0) == ("ok", [])
 
 
 def test_lake_never_exported(tmp_path: Path) -> None:

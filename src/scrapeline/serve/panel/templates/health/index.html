@@ -7,7 +7,7 @@
 <section class="verdict verdict-{{ state }}">
   <h1>Health</h1>
   {% if state == "ok" %}
-  <p>All clear: no failing or overdue sources, no stalled or failed jobs, no open incidents.</p>
+  <p>All clear: no failing or overdue sources, no stalled jobs, no jobs failed in the last {{ failed_hours }} hours, no open incidents.</p>
   {% else %}
   <p>{{ problems | join(", ") }}.</p>
   {% endif %}
@@ -19,7 +19,7 @@
   <div><dt>Jobs queued</dt><dd>{{ queue.queued | number }}<small>{% if queue.oldest_queued %}oldest {{ reltime(queue.oldest_queued) }}{% else %}queue empty{% endif %}</small></dd></div>
   <div><dt>Jobs running</dt><dd>{{ queue.running | number }}<small>claimed by a worker</small></dd></div>
   <div{% if queue.stalled %} class="is-warn"{% endif %}><dt>Stalled jobs</dt><dd>{{ queue.stalled | number }}<small>lease expired while running</small></dd></div>
-  <div{% if queue.failed %} class="is-bad"{% endif %}><dt>Failed jobs</dt><dd>{{ queue.failed | number }}<small>out of retries</small></dd></div>
+  <div{% if queue.failed %} class="is-bad"{% endif %}><dt>Failed jobs ({{ failed_hours }} h)</dt><dd>{{ queue.failed | number }}<small>out of retries; {{ queue.failed_total | number }} in all</small></dd></div>
   <div{% if open_incidents %} class="is-bad"{% endif %}><dt>Open incidents</dt><dd>{{ open_incidents | number }}<small>open or acknowledged</small></dd></div>
   <div><dt>Lake export</dt><dd>
     {% if lake.error %}unreadable<small>{{ lake.error | short(80) }}</small>

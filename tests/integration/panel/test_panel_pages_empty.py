@@ -12,6 +12,8 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from selectolax.lexbor import LexborHTMLParser as HTMLParser
+from selectolax.lexbor import LexborNode as Node
 from sqlalchemy import Connection, Engine
 
 from scrapeline.serve.panel.app import create_app
@@ -222,6 +224,47 @@ def test_health_counts_stalled_and_failed_jobs(client: TestClient, clean_db: Eng
             )
         )
         conn.execute(t.job.insert().values(kind="run", source_id="queue-test", status="dead"))
+        add_dead_job(conn, "queue-test", NOW - timedelta(days=3))
     page = client.get("/").text
-    assert "1 stalled job, 1 failed job." in page
+    assert "1 stalled job, 1 failed job in the last 24 h." in page
     assert "verdict-bad" in page
+    assert failed_jobs_tile(page) == "1 out of retries; 2 in all"
+
+
+def test_jobs_that_died_days_ago_leave_health_clear(client: TestClient, clean_db: Engine) -> None:
+    """A dead job stays in the queue table; once it is old it no longer turns health red."""
+    with clean_db.begin() as conn:
+        add_source(conn, "recovered", status="draft")
+        add_dead_job(conn, "recovered", NOW - timedelta(days=3))
+        add_dead_job(conn, "recovered", NOW - timedelta(hours=25))
+    page = client.get("/").text
+    assert "All clear" in page
+    assert "verdict-ok" in page
+    assert failed_jobs_tile(page) == "0 out of retries; 2 in all"
+
+
+def text_of(node: Node, selector: str) -> str:
+    """Whitespace-normalised text of the first match, which must exist."""
+    found = node.css_first(selector)
+    assert found is not None, selector
+    return " ".join(found.text(separator=" ").split())
+
+
+def failed_jobs_tile(page: str) -> str:
+    for tile in HTMLParser(page).css("dl.stats > div"):
+        if text_of(tile, "dt") == "Failed jobs (24 h)":
+            return text_of(tile, "dd")
+    raise AssertionError("no failed jobs tile")
+
+
+def add_dead_job(conn: Connection, source_id: str, died: datetime) -> None:
+    conn.execute(
+        t.job.insert().values(
+            kind="run",
+            source_id=source_id,
+            status="dead",
+            attempts=3,
+            created_at=died - timedelta(minutes=30),
+            updated_at=died,
+        )
+    )
