@@ -282,7 +282,7 @@ Flow: instruction → validate (URL policy, robots, usage) → worker captures s
 | 0 | Contracts: schema registry and packs, locale and money types, site taxonomy, scrape instruction, events, record-store and lake interfaces, migration 0005, ADR-0006/7/8, CLI split | done 2026-11-24 |
 | 1 | Generic data: record store with history, locale-aware parsing, instruction compile | done 2026-11-24 (3 builders, 3 reviewers, 24 findings, 22 fixed) |
 | 2 | Demo sources, lake export, dbt, site classifier, runner split + layer contracts | done 2026-11-24 (5 builders, 5 reviewers; dbt 147 models/tests green on the real lake) |
-| 3 | Control panel: read-only pages, data and lineage views, live events | in progress (prep: app shell, compose `panel` service, seeded panel fixtures) |
+| 3 | Control panel: read-only pages, data and lineage views, live events | done 2026-11-25 (3 builders, 3 reviewers, 22 findings, 22 fixed; migration 0007; panel verified in Docker with live events) |
 | 4 | Panel actions and auth, OpenLineage, LLM classifier fallback, agents page, README/demo | planned |
 
 ### 7.2 Waves and file ownership

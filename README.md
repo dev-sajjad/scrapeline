@@ -32,6 +32,21 @@ Register a source with one YAML file. scrapeline fetches it politely, stores eve
 - Drift diagnosis: which selectors stopped matching and how the page structure changed
 - Incidents with an open, acknowledged, closed lifecycle and a runbook per incident type
 
+**Data and history**
+- Versioned dataset types (product, article, job posting, meeting, or your own) with typed fields, key fields and personal-data flags
+- Every change kept as history: inserts, updates, removals and restores, each linked to its run and raw response
+- Locale-aware parsing of dates, times, money and numbers; ambiguous values are rejected, never guessed
+- Websites classified by category (e-commerce, news, government, education, ...) with evidence and an audit log
+
+**Analytics**
+- Incremental Parquet lake export, then dbt (DuckDB) staging, history and marts
+- Marts for price and stock history and for scraper health per source and day
+
+**Control panel**
+- Health at a glance: failing or overdue sources, job queue, incidents, lake freshness
+- Sources, sites, runs (checks, rejects, fetch log), incidents, records with their full lineage, storage, marts
+- Live event feed over Server-Sent Events; read-only, bound to localhost, strict content security policy
+
 **AI agents**
 - **Repair agent** fixes a broken site adapter; **generator agent** writes a new one from sample pages
 - Agents work in a scoped workspace through 8 typed tools; page content is treated as untrusted data
@@ -65,6 +80,8 @@ config/sources/<id>.yaml
         │
         ▼
    agents (offline sandbox) → deterministic tester → agent/* branch → human review
+
+   Parquet lake → dbt (DuckDB) marts          ops.event → control panel (live)
 ```
 
 The scraping pipeline never depends on an LLM. If the AI service is unavailable, collection, loading, checks and alerts keep running.
@@ -76,9 +93,17 @@ Requirements: Docker (Desktop, OrbStack, Colima or any Docker Engine runtime) an
 ```bash
 cp .env.example .env
 make setup        # Python 3.12, dependencies, Chromium
-make up           # PostgreSQL and fixture sites
+make up           # PostgreSQL, fixture sites and the control panel (first run builds the app image)
 make migrate      # apply database migrations
 make demo         # end-to-end walkthrough, no API key needed
+```
+
+Open the control panel at http://localhost:8000. To see price history build up and reach the marts:
+
+```bash
+make demo-history # a simulated shop over three days: price changes, a removal, a restore
+make lake         # export to the Parquet lake in data/lake
+make dbt          # build and test the dbt marts
 ```
 
 Run a real source:
@@ -147,24 +172,32 @@ Running a source again inserts nothing new; `scrapeline reprocess` rebuilds ever
 | `scrapeline eval run` | Run agent benchmarks |
 | `scrapeline schedule` / `worker` | Enqueue due sources and process the job queue |
 | `scrapeline status <source>` | Latest runs, checks and open incidents |
+| `scrapeline instruction validate` / `apply` | Turn a scrape instruction into a draft source |
+| `scrapeline dataset list` / `show` / `sync` | Inspect and register dataset types |
+| `scrapeline site list` / `classify` / `override` | Website categories and their evidence |
+| `scrapeline lake export` / `status` | Export to the Parquet lake |
 
-A read-only HTTP API (`make api`) serves `/health`, `/sources`, `/meetings` and `/incidents`.
+The control panel mounts a read-only JSON API at `/api` (`/api/health`, `/api/sources`, `/api/meetings`, `/api/incidents`).
 
 ## Project layout
 
 ```
 src/scrapeline/
+  catalog/     dataset types, built-in packs, site categories and classifier
+  registry/    source config and scrape instructions
   fetch/       network access: URL policy, rate limiter, robots.txt, httpx client, Playwright pool
   store/       raw store, database engine, table definitions
   adapters/    adapter contract, declarative spec engine, platform and site adapters
-  pipeline/    models, normalisation, identity, loading, run orchestration, documents
+  pipeline/    models, locale-aware parsing, identity, record history, loading, run orchestration
   quality/     checks, drift diagnosis, anti-bot detection, incidents
-  ops/         queue, worker, run bookkeeping, logging
+  ops/         queue, worker, run bookkeeping, events, logging
   agents/      LLM wrapper, tools, tester, sandbox harness, repairer, generator, prompts
   evals/       benchmark runner and metrics
-  serve/       read-only HTTP API
+  analytics/   lake layout and Parquet exporter
+  serve/       read-only HTTP API and the control panel
 config/sources/  one YAML file per source
 alembic/         database migrations
+dbt/             dbt project over the lake: staging, history, marts
 tests/           unit, integration, fixture sites, expected rows, real-page snapshots
 docker/          app image, offline sandbox image, fixture web server
 docs/            ADRs, runbooks, eval results
@@ -181,11 +214,16 @@ make eval-baseline  # agent benchmarks without an LLM (free)
 make eval           # agent benchmarks with Claude (requires API key)
 ```
 
-Tooling: ruff, mypy (strict), pytest, pre-commit, GitHub Actions. CI runs lint and types, 113 unit tests, 24 integration and browser tests, a migration drift check, both image builds and the sandbox isolation check.
+```bash
+make panel        # control panel from this checkout, reloads on change
+make lint-imports # layer contracts between interface, application and domain code
+```
+
+Tooling: ruff, mypy (strict), import-linter, pytest, pre-commit, GitHub Actions. CI runs lint, types and layer contracts, unit tests, integration and browser tests against PostgreSQL, a migration drift check, a dbt build on a sample lake, both image builds and the sandbox isolation check.
 
 ## Documentation
 
-- [Architecture decisions](docs/adr): agent loop, job queue, sandbox networking, URL policy scope
+- [Architecture decisions](docs/adr): agent loop, job queue, sandbox networking, URL policy scope, generic records and history, local lakehouse, control panel
 - [Runbooks](docs/runbook): one page per incident type
 - [Agent evals](docs/evals.md): benchmark design and results
 - [AI review log](docs/ai-review-log.md): defects found in AI-written code, with root causes
@@ -196,7 +234,7 @@ scrapeline collects only public pages and official APIs, identifies itself with 
 
 ## Roadmap
 
-- Per-source locale, timezone and date order for sources outside the US
-- Generic record schema for data beyond meetings
+- Panel actions behind a login token: add instructions, approve, run now, backfill, handle incidents
+- OpenLineage events and an LLM fallback for site classification
 - Sources from more countries and languages, including generator-built adapters
 - S3 raw store backend
