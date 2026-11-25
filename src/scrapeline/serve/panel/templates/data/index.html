@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge, empty %}
+{% block content %}
+<h1>Data</h1>
+<p>Every dataset type the platform knows. Generic datasets keep each record's full history;
+typed datasets (the civic pack) keep the current row in a table of their own.</p>
+
+{% if problem %}
+<p role="alert"><strong>Dataset definitions in the config could not be loaded:</strong> {{ problem }}</p>
+{% endif %}
+
+{% if rows %}
+<table>
+  <caption class="empty">Record counts are exact; "not synced" types are defined in files but not yet in the catalog (<code>scrapeline dataset sync</code>).</caption>
+  <thead>
+    <tr>
+      <th scope="col">Dataset</th>
+      <th scope="col" class="num">Version</th>
+      <th scope="col">Storage</th>
+      <th scope="col" class="num">Fields</th>
+      <th scope="col" class="num">Keys</th>
+      <th scope="col" class="num">Current</th>
+      <th scope="col" class="num">Removed</th>
+      <th scope="col">Sources</th>
+      <th scope="col">Last seen</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for info, usage in rows %}
+    <tr>
+      <th scope="row">
+        <a href="/data/{{ info.name }}">{{ info.name }}</a>
+        {% if info.needs_sync %} {{ badge("not synced") }}{% endif %}
+        <br><span class="empty">{{ info.pack }} · {{ info.description }}</span>
+      </th>
+      <td class="num">v{{ info.version }}</td>
+      <td>{{ info.storage }}</td>
+      <td class="num">{{ info.fields | length }}</td>
+      <td class="num">{{ info.key_fields | length }}</td>
+      <td class="num">{{ usage.current | number }}</td>
+      <td class="num">{% if usage.removed is none %}<span class="empty">—</span>{% else %}{{ usage.removed | number }}{% endif %}</td>
+      <td>
+        {% set ids = usage.sources | sort %}
+        {% for source_id in ids[:sources_shown] %}<a href="/sources/{{ source_id }}">{{ source_id }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+        {% if ids | length > sources_shown %} and {{ ids | length - sources_shown }} more{% endif %}
+        {% if not ids %}<span class="empty">none</span>{% endif %}
+      </td>
+      <td>{% if usage.last_seen %}<time datetime="{{ usage.last_seen.isoformat() }}" title="{{ usage.last_seen | dt }}">{{ usage.last_seen | ago }}</time>{% else %}<span class="empty">never</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+{{ empty("No dataset types yet. Define one in config/datasets/ or run: scrapeline dataset sync") }}
+{% endif %}
+{% endblock %}

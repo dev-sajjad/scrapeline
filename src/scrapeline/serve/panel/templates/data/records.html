@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge, empty, pager %}
+{% import "data/_macros.html" as dm %}
+{% block content %}
+<nav aria-label="Breadcrumb"><a href="/data">Data</a> / {{ info.name }}</nav>
+<h1>{{ info.name }} <span class="empty">v{{ info.version }} · {{ info.storage }}</span></h1>
+<p>{{ info.description }}</p>
+{% if info.typed %}
+<p>Typed dataset: rows live in their own table and keep only the current values, without version history.</p>
+{% endif %}
+
+<form method="get" action="/data/{{ info.name }}" role="search" aria-label="Filter records">
+  <label for="source_id">Source</label>
+  <select id="source_id" name="source_id">
+    <option value="">All sources</option>
+    {% for option in source_options %}
+    <option value="{{ option }}"{% if option == filters.source_id %} selected{% endif %}>{{ option }}</option>
+    {% endfor %}
+  </select>
+  {% if not info.typed %}
+  <label for="state">State</label>
+  <select id="state" name="state">
+    {% for value, label in [("current", "Current"), ("removed", "Removed"), ("all", "All")] %}
+    <option value="{{ value }}"{% if value == filters.state %} selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  {% endif %}
+  <label for="q">Search</label>
+  <input id="q" name="q" type="search" value="{{ filters.q or '' }}" maxlength="100" placeholder="Text in any field">
+  <button type="submit">Filter</button>
+  <a href="/data/{{ info.name }}">Reset</a>
+</form>
+
+<p>{{ total | number }} {% if total == 1 %}record{% else %}records{% endif %}{% if not info.typed and filters.state != "all" %} ({{ filters.state }}){% endif %}, most recently seen first.</p>
+
+{% if rows %}
+<table>
+  <thead>
+    <tr>
+      <th scope="col">Record</th>
+      <th scope="col">Source</th>
+      {% for name, f in fields %}
+      <th scope="col"{% if f.type in ("int", "float", "decimal", "money") %} class="num"{% endif %}>{{ name }}{{ dm.field_flags(f) }}</th>
+      {% endfor %}
+      {% if not info.typed %}<th scope="col">State</th>{% endif %}
+      <th scope="col">Last seen</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <th scope="row"><a class="mono" href="/data/{{ info.name }}/{{ row.id }}" title="{{ row.external_id }}">{{ row.external_id | short(24) }}</a></th>
+      <td><a href="/sources/{{ row.source_id }}">{{ row.source_id }}</a></td>
+      {% for c in row.cells %}
+      {% set f = fields[loop.index0][1] %}
+      <td{% if f.type in ("int", "float", "decimal", "money") %} class="num"{% endif %}>{{ dm.cell(c) }}</td>
+      {% endfor %}
+      {% if not info.typed %}<td>{% if row.removed_at %}{{ badge("removed") }}{% else %}current{% endif %}</td>{% endif %}
+      <td><time datetime="{{ row.last_seen_at.isoformat() }}">{{ row.last_seen_at | dt }}</time></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{{ pager(request, page, total) }}
+{% if hidden %}
+<p class="empty">Not shown because they are empty on this page: {{ hidden | join(", ") }}.</p>
+{% endif %}
+{% elif filters.q or filters.source_id or filters.state != "current" %}
+{{ empty("No records match these filters.") }}
+{% else %}
+{{ empty("No records yet. They appear after the first successful run of a source that collects " ~ info.name ~ ".") }}
+{% endif %}
+{% endblock %}
