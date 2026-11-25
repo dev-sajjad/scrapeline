@@ -43,8 +43,8 @@ def engine() -> Iterator[Engine]:
     eng.dispose()
 
 
-@pytest.fixture
-def clean_db(engine: Engine) -> Engine:
+def truncate_all(engine: Engine) -> None:
+    """Empty every table the tests write to; the seeded site categories stay."""
     with engine.begin() as conn:
         conn.execute(
             text(
@@ -55,6 +55,11 @@ def clean_db(engine: Engine) -> Engine:
                 "RESTART IDENTITY CASCADE"
             )
         )
+
+
+@pytest.fixture
+def clean_db(engine: Engine) -> Engine:
+    truncate_all(engine)
     return engine
 
 
@@ -90,8 +95,7 @@ def fake_legistar() -> FakeLegistar:
     return FakeLegistar()
 
 
-@pytest.fixture
-def test_source() -> SourceConfig:
+def legistar_test_source() -> SourceConfig:
     return SourceConfig.model_validate(
         {
             "id": "legistar-testcity",
@@ -107,6 +111,11 @@ def test_source() -> SourceConfig:
             "politeness": {"rps": 5},
         }
     )
+
+
+@pytest.fixture
+def test_source() -> SourceConfig:
+    return legistar_test_source()
 
 
 @pytest.fixture

@@ -1,0 +1,24 @@
+{# Small building blocks shared by every page. #}
+
+{% macro badge(value) -%}
+<span class="badge badge-{{ value | lower | replace(' ', '-') }}">{{ value }}</span>
+{%- endmacro %}
+
+{% macro empty(message) -%}
+<p class="empty">{{ message }}</p>
+{%- endmacro %}
+
+{# Previous/next links that keep the current query string filters. #}
+{% macro pager(request, page, total) -%}
+{% if page.previous_offset is not none or page.has_next(total) %}
+<nav class="pager" aria-label="Pages">
+  {% if page.previous_offset is not none %}
+  <a href="{{ request.url.include_query_params(offset=page.previous_offset) }}">← Previous</a>
+  {% endif %}
+  <span>{{ page.offset + 1 }}–{{ [page.offset + page.limit, total] | min }} of {{ total | number }}</span>
+  {% if page.has_next(total) %}
+  <a href="{{ request.url.include_query_params(offset=page.offset + page.limit) }}">Next →</a>
+  {% endif %}
+</nav>
+{% endif %}
+{%- endmacro %}

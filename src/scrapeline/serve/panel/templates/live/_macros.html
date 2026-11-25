@@ -1,0 +1,10 @@
+{# Live event feed. The stream first replays recent events, then pushes new ones. #}
+{% macro live_feed(source_id=none, run_id=none) -%}
+{% set query = [] %}
+{% if source_id %}{% set _ = query.append(("source_id", source_id)) %}{% endif %}
+{% if run_id %}{% set _ = query.append(("run_id", run_id | string)) %}{% endif %}
+<table class="events">
+  <thead><tr><th>Time</th><th>Event</th><th>Source</th><th>Message</th></tr></thead>
+  <tbody hx-ext="sse" sse-connect="/events/stream?{{ query | urlencode }}" sse-swap="ops" hx-swap="afterbegin"></tbody>
+</table>
+{%- endmacro %}

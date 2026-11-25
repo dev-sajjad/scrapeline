@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Health</h1>
+<dl class="stats">
+  <div><dt>Sources</dt><dd>{{ sources | number }}</dd></div>
+  <div><dt>Open incidents</dt><dd>{{ open_incidents | number }}</dd></div>
+</dl>
+{% endblock %}

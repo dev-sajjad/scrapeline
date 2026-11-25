@@ -1,4 +1,4 @@
-.PHONY: setup up down shell image sandbox-image sandbox-check test test-int test-browser lint fmt type check lint-imports migrate datasets eval eval-baseline api demo demo-history lake dbt dbt-docs
+.PHONY: setup up up-core down panel shell image sandbox-image sandbox-check test test-int test-browser lint fmt type check lint-imports migrate datasets eval eval-baseline api demo demo-history lake dbt dbt-docs
 
 setup:          ## one-time: python 3.12 venv + deps + chromium for local runs
 	uv python install 3.12
@@ -6,11 +6,17 @@ setup:          ## one-time: python 3.12 venv + deps + chromium for local runs
 	uv run playwright install chromium
 	uv run pre-commit install
 
-up:             ## start postgres + fixture sites (works on Kiri, Docker Desktop, OrbStack, Colima)
+up:             ## start postgres, fixture sites and the control panel on http://localhost:8000
+	docker compose --profile panel up -d --wait --build
+
+up-core:        ## start only postgres + fixture sites (works on Kiri, Docker Desktop, OrbStack, Colima)
 	docker compose up -d --wait
 
 down:
-	docker compose down
+	docker compose --profile panel --profile prod down
+
+panel:          ## control panel from this checkout on http://localhost:8000, reloads on change
+	uv run uvicorn scrapeline.serve.panel.app:create_app --factory --port 8000 --reload
 
 image:          ## build the app/worker image (Playwright base)
 	docker compose --profile app build app

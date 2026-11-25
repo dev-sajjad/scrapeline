@@ -107,7 +107,8 @@ src/scrapeline/
   agents/            llm.py, generator.py, repairer.py, tester.py, sandbox_harness.py, tools/, prompts/
   evals/             runner.py
   analytics/         layout.py (lake contract), export.py (Parquet exporter)
-  serve/             api.py (read API), panel/ (control panel, wave 3)
+  serve/             api.py (read API, mounted at /api), panel/ (control panel: app.py factory, deps.py,
+                     filters.py, live.py event hub, pages/<area>.py routers, templates/, static/)
 alembic/             migrations
 config/sources/      one YAML per source        config/datasets/   user-defined dataset types
 config/instructions/ example scrape instructions
@@ -280,7 +281,7 @@ Flow: instruction → validate (URL policy, robots, usage) → worker captures s
 | 0 | Contracts: schema registry and packs, locale and money types, site taxonomy, scrape instruction, events, record-store and lake interfaces, migration 0005, ADR-0006/7/8, CLI split | done 2026-11-24 |
 | 1 | Generic data: record store with history, locale-aware parsing, instruction compile | done 2026-11-24 (3 builders, 3 reviewers, 24 findings, 22 fixed) |
 | 2 | Demo sources, lake export, dbt, site classifier, runner split + layer contracts | done 2026-11-24 (5 builders, 5 reviewers; dbt 147 models/tests green on the real lake) |
-| 3 | Control panel: read-only pages, data and lineage views, live events | next |
+| 3 | Control panel: read-only pages, data and lineage views, live events | in progress (prep: app shell, compose `panel` service, seeded panel fixtures) |
 | 4 | Panel actions and auth, OpenLineage, LLM classifier fallback, agents page, README/demo | planned |
 
 ### 7.2 Waves and file ownership
@@ -297,9 +298,10 @@ A file has exactly one owner per wave. Builders change only files they own; anyt
 | 2 | F dbt | dbt-duckdb project; staging models generated from the registry; dims; marts `price_history`, `scraper_health_daily`; dbt tests and docs | `dbt/`, `scripts/gen_dbt_staging.py` |
 | 2 | G classifier | Site classifier: domain rules, page evidence, platform fingerprints; audit log; `site classify/override` CLI | `catalog/classify.py`, `cli/sites.py`, tests |
 | 2 | H structure | Split `runner.py` into crawl / ingest / finalise (no behaviour change); `import-linter` layer contracts; CI jobs for layer contracts, lake export and `dbt build` | `pipeline/runner.py` + new `pipeline/crawl.py`, `ingest.py`, `finalise.py`, `.importlinter`, `.github/workflows/ci.yml` |
-| 3 | I panel shell | Panel app, layout, health, sources, sites, runs pages; `panel` compose service | `serve/panel/` (shell, those pages) |
-| 3 | J data views | Data explorer, record lineage (record → version → raw file), storage browser, marts view | `serve/panel/` (those pages) |
-| 3 | K live | `LISTEN` → SSE stream, live run log | `serve/panel/live.py`, `ops/events.py` (listener side) |
+| 3 | I pages | Layout and styling; health, sources, sites, runs (stats, checks, rejects, fetch log, live run log) and incidents pages | `serve/panel/pages/{health,sources,sites,runs,incidents}.py`, `serve/panel/filters.py`, `templates/{base,_macros}.html`, `templates/{health,sources,sites,runs,incidents}/`, `static/panel.css`, tests `test_panel_pages_*` |
+| 3 | J data views | Data explorer, record lineage (record → versions → run → raw file), storage (raw store, database, lake, warehouse), raw file view, marts (read-only DuckDB) | `serve/panel/pages/{data,storage,marts}.py`, `templates/{data,storage,marts}/`, tests `test_panel_data_*` |
+| 3 | K live | One `LISTEN` connection per process fanned out to subscribers; SSE stream with replay and filters; live page; the `live_feed` macro | `ops/events.py` (listener side), `serve/panel/live.py`, `serve/panel/pages/live.py`, `templates/live/`, tests `test_panel_live_*` |
+| 3 | orchestrator | Panel shell shared by I, J, K (requests only) | `serve/panel/app.py`, `deps.py`, `templates/error.html`, `static/vendor/`, `tests/integration/panel/conftest.py`, compose, Dockerfile |
 | 4 | L actions | Add instruction, approval gates, run now, backfill, incident ack/close, category override; login token, CSRF, audit | `serve/panel/actions*` |
 | 4 | M lineage | OpenLineage events; LLM fallback for the classifier | `ops/openlineage.py`, `catalog/classify_llm.py` |
 | 4 | N agents | Agents page (start repair/generate, diff, cost); README and demo update | `serve/panel/agents*`, `README.md`, `scripts/demo.sh` |
@@ -331,4 +333,4 @@ A file has exactly one owner per wave. Builders change only files they own; anyt
 ## 9. Commands
 CLI areas: `source`, `run`/`reprocess`/`verify`/`status`, `dataset list|show|sync`, `instruction validate|apply`, `drift`, `agent`, `eval`, `schedule`/`worker` (`scrapeline --help`).
 
-`make setup` · `make up` · `make image` · `make shell` · `make sandbox-check` · `make check` · `make lint-imports` · `make datasets` · `make demo-history` · `make lake` · `make dbt` · `make dbt-docs` · `make test` · `make test-int` · `make lint` · `make type` · `make migrate` · `make eval` · `make demo` · `scrapeline --help`
+`make setup` · `make up` (postgres, fixtures and the panel on http://localhost:8000) · `make up-core` · `make panel` (panel from the checkout, reloads) · `make image` · `make shell` · `make sandbox-check` · `make check` · `make lint-imports` · `make datasets` · `make demo-history` · `make lake` · `make dbt` · `make dbt-docs` · `make test` · `make test-int` · `make lint` · `make type` · `make migrate` · `make eval` · `make demo` · `scrapeline --help`
