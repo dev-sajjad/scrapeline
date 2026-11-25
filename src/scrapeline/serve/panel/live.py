@@ -3,8 +3,9 @@
 The hub starts with its first subscriber. For each notice it reads the event row once and
 queues it for every subscriber whose filter matches. A subscriber that falls behind is
 dropped instead of slowing the others: its stream ends and the browser reconnects with
-Last-Event-ID. When the listening connection is lost, the hub reconnects with backoff and
-catches up from `ops.event`, so events committed during the outage still reach subscribers.
+Last-Event-ID. When the listening connection is lost or stops answering, the hub reconnects
+with backoff and catches up from `ops.event`, so events committed during the outage still
+reach subscribers.
 """
 
 from __future__ import annotations
@@ -106,6 +107,7 @@ class EventHub:
         ready_timeout: float = 5.0,
         backoff: tuple[float, float] = (0.5, 15.0),
         ping_every: float = 15.0,
+        ping_timeout: float = 5.0,
     ) -> None:
         self.engine = engine
         self.max_subscribers = max_subscribers
@@ -113,6 +115,7 @@ class EventHub:
         self.ready_timeout = ready_timeout
         self.backoff = backoff
         self.ping_every = ping_every
+        self.ping_timeout = ping_timeout
         self.listener_pid: int | None = None
         self._conninfo = listen_conninfo(engine.url)
         self._subscribers: set[Subscription] = set()
@@ -180,13 +183,17 @@ class EventHub:
         delay = self.backoff[0]
         while True:
             try:
-                async with await EventListener.connect(self._conninfo) as listener:
+                connecting = EventListener.connect(self._conninfo, listen_timeout=self.ping_timeout)
+                async with await connecting as listener:
                     self.listener_pid = listener.backend_pid
                     await self._catch_up()
                     self._listening.set()
                     delay = self.backoff[0]
                     log.info("live.listening", pid=self.listener_pid, db=self.engine.url.database)
-                    async for notice in listener.notices(ping_every=self.ping_every):
+                    notices = listener.notices(
+                        ping_every=self.ping_every, ping_timeout=self.ping_timeout
+                    )
+                    async for notice in notices:
                         await self._deliver(notice)
             except Exception as exc:  # whatever broke, the remedy is the same: reconnect
                 log.warning("live.listener_lost", error=repr(exc), retry_in=delay)

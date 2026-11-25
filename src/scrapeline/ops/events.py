@@ -11,6 +11,7 @@ The read side serves live views: `recent_events` and `events_since` query stored
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import uuid
@@ -22,10 +23,12 @@ from typing import Any, Literal, Protocol, Self, get_args
 
 import psycopg
 from psycopg import sql
+from psycopg.abc import Query
 from psycopg.conninfo import make_conninfo
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import URL, ColumnElement, Connection, Engine, Row, and_, func, or_, select, true
 
+from scrapeline.errors import ScrapelineError
 from scrapeline.ops.logging import get_logger
 from scrapeline.store import tables as t
 
@@ -259,6 +262,10 @@ def latest_event_id(conn: Connection) -> int:
 LISTENER_APPLICATION = "scrapeline-live"
 
 
+class ListenerStalledError(ScrapelineError):
+    """The database did not answer on the listening connection in time; it has been closed."""
+
+
 def listen_conninfo(url: URL) -> str:
     """A libpq connection string for a SQLAlchemy URL such as postgresql+psycopg://...
 
@@ -268,6 +275,30 @@ def listen_conninfo(url: URL) -> str:
     for key, value in url.query.items():
         params[key] = value if isinstance(value, str) else value[-1]
     return make_conninfo(**{key: str(value) for key, value in params.items()})
+
+
+async def _execute_within(conn: psycopg.AsyncConnection[Any], query: Query, timeout: float) -> None:
+    """Run `query`; without an answer in `timeout` seconds, close the connection and raise
+    ListenerStalledError.
+
+    Only a deadline notices a stall once a query is in flight: TCP keepalives do not run
+    then, and a proxy that stopped forwarding still acknowledges every packet.
+    """
+    pending = asyncio.ensure_future(conn.execute(query))
+    try:
+        done, _ = await asyncio.wait({pending}, timeout=timeout)
+    finally:
+        if not pending.done():  # timed out, or the caller was cancelled
+            # Closing first leaves psycopg nothing to cancel on the server, which it would
+            # otherwise try for up to 10 s; the query then ends at once.
+            await conn.close()
+            pending.cancel()
+            await asyncio.wait({pending})
+    if pending not in done:
+        if not pending.cancelled():
+            pending.exception()  # marks it retrieved; the stall is the error to report
+        raise ListenerStalledError(f"the database did not answer within {timeout:g} s")
+    pending.result()
 
 
 class EventListener:
@@ -282,20 +313,18 @@ class EventListener:
         self._conn = conn
 
     @classmethod
-    async def connect(cls, conninfo: str, *, connect_timeout: int = 5) -> EventListener:
+    async def connect(
+        cls, conninfo: str, *, connect_timeout: int = 5, listen_timeout: float = 5.0
+    ) -> EventListener:
         conn: psycopg.AsyncConnection[Any] = await psycopg.AsyncConnection.connect(
             conninfo,
             autocommit=True,
             connect_timeout=connect_timeout,
             application_name=LISTENER_APPLICATION,
-            # Without keepalives a silently dropped connection waits for notifications forever.
-            keepalives=1,
-            keepalives_idle=30,
-            keepalives_interval=10,
-            keepalives_count=3,
         )
         try:
-            await conn.execute(sql.SQL("LISTEN {}").format(sql.Identifier(EVENTS_CHANNEL)))
+            listen = sql.SQL("LISTEN {}").format(sql.Identifier(EVENTS_CHANNEL))
+            await _execute_within(conn, listen, listen_timeout)
         except BaseException:
             await conn.close()
             raise
@@ -305,11 +334,15 @@ class EventListener:
     def backend_pid(self) -> int:
         return self._conn.info.backend_pid
 
-    async def notices(self, *, ping_every: float = 15.0) -> AsyncIterator[EventNotice]:
-        """Parsed notices as they arrive. Raises when the connection is lost.
+    async def notices(
+        self, *, ping_every: float = 15.0, ping_timeout: float = 5.0
+    ) -> AsyncIterator[EventNotice]:
+        """Parsed notices as they arrive. Raises when the connection is lost or stalls.
 
-        A quiet connection is pinged every `ping_every` seconds so that a dead one fails
-        here instead of going unnoticed.
+        A connection quiet for `ping_every` seconds is pinged, and one that does not answer
+        within `ping_timeout` seconds is closed with ListenerStalledError. So a dead or stuck
+        connection is noticed within `ping_every + ping_timeout` seconds, never left waiting
+        for notifications that cannot arrive.
         """
         while True:
             quiet = True
@@ -318,7 +351,7 @@ class EventListener:
                 if (notice := parse_notice(notify.payload)) is not None:
                     yield notice
             if quiet:
-                await self._conn.execute("SELECT 1")
+                await _execute_within(self._conn, "SELECT 1", ping_timeout)
 
     async def aclose(self) -> None:
         await self._conn.close()

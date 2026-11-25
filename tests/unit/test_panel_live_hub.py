@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi import FastAPI
@@ -17,6 +17,8 @@ from sqlalchemy.dialects import postgresql
 from scrapeline.ops.events import (
     LEVELS,
     EventFilter,
+    EventListener,
+    ListenerStalledError,
     StoredEvent,
     listen_conninfo,
     parse_notice,
@@ -247,6 +249,59 @@ async def test_hub_without_a_database_is_unavailable_not_stuck(unreachable: Engi
         await hub.subscribe(EventFilter())
     assert not hub.listening
     await hub.stop()
+
+
+class StalledConnection:
+    """No notifications and no answer to any query, like a connection behind a stuck proxy."""
+
+    def __init__(self) -> None:
+        self.closed = False
+        self.querying = asyncio.Event()
+        self.query_cancelled = False
+
+    async def notifies(self, *, timeout: float) -> AsyncIterator[object]:
+        await asyncio.sleep(timeout)
+        for notify in ():
+            yield notify
+
+    async def execute(self, query: object) -> None:
+        self.querying.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.query_cancelled = True
+            raise
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.anyio
+async def test_a_ping_without_an_answer_closes_the_listener_and_raises() -> None:
+    conn = StalledConnection()
+    listener = EventListener(cast(Any, conn))
+    with pytest.raises(ListenerStalledError):
+        async with asyncio.timeout(2):
+            async for _ in listener.notices(ping_every=0.05, ping_timeout=0.1):
+                pass
+    assert conn.closed and conn.query_cancelled
+
+
+@pytest.mark.anyio
+async def test_cancelling_a_listener_mid_ping_closes_it_and_ends_the_ping() -> None:
+    conn = StalledConnection()
+    listener = EventListener(cast(Any, conn))
+
+    async def listen() -> None:
+        async for _ in listener.notices(ping_every=0.01, ping_timeout=60):
+            pass
+
+    task = asyncio.ensure_future(listen())
+    await asyncio.wait_for(conn.querying.wait(), 2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, 2)
+    assert conn.closed and conn.query_cancelled
 
 
 async def drain(subscription: live.Subscription) -> list[StoredEvent]:
