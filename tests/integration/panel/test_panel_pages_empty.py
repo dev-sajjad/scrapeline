@@ -105,7 +105,7 @@ def test_empty_health_is_all_clear(client: TestClient) -> None:
     assert "All clear" in page
     assert "make lake" in page
     assert "No open incidents." in page
-    assert 'sse-connect="/events/stream?"' in page
+    assert 'sse-connect="/events/stream"' in page
 
 
 def test_filters_on_an_empty_database_say_nothing_matches(client: TestClient) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from urllib.parse import parse_qsl, urlsplit
 
 import pytest
 from fastapi.testclient import TestClient
@@ -53,6 +54,14 @@ def kv(tree: HTMLParser, label: str) -> str:
 
 def classes(node: Node | None) -> str:
     return (node.attributes.get("class") or "") if node is not None else ""
+
+
+def live_stream(tree: HTMLParser) -> tuple[str, dict[str, str]]:
+    """The live feed's stream path and query, wherever the feed puts its sse-connect."""
+    feed = tree.css_first("[sse-connect]")
+    assert feed is not None
+    url = urlsplit(feed.attributes["sse-connect"] or "")
+    return url.path, dict(parse_qsl(url.query))
 
 
 def section_rows(tree: HTMLParser, heading: str) -> list[str]:
@@ -107,8 +116,7 @@ def test_health_lists_open_incidents_lake_state_and_activity(client: TestClient)
     assert any("Price missing on 2 of 20 products" in row for row in incidents)
     assert len(incidents) == 2
     assert stat(tree, "Lake export") == "never export with make lake"
-    feed = tree.css_first("table.events tbody")
-    assert feed is not None and feed.attributes["sse-connect"] == "/events/stream?"
+    assert live_stream(tree) == ("/events/stream", {})
 
 
 # Sources
@@ -179,9 +187,7 @@ def test_source_page_shows_config_runs_incidents_and_events(
     versions = section_rows(tree, "Scraper versions")
     assert len(versions) == 1
     assert "scrapeline.adapters.declarative:DeclarativeAdapter" in versions[0]
-    feed = tree.css_first("table.events tbody")
-    assert feed is not None
-    assert feed.attributes["sse-connect"] == "/events/stream?source_id=shop-sim"
+    assert live_stream(tree) == ("/events/stream", {"source_id": "shop-sim"})
 
 
 def test_typed_source_page_counts_its_tables(client: TestClient) -> None:
@@ -306,9 +312,7 @@ def test_run_page_shows_loads_checks_and_fetches(client: TestClient, seeded: See
     assert len(raw_links) == 2
     assert all(re.fullmatch(r"/storage/raw/[0-9a-f]{64}", href or "") for href in raw_links)
     assert section_rows(tree, "Rejects") == []
-    feed = tree.css_first("table.events tbody")
-    assert feed is not None
-    assert feed.attributes["sse-connect"] == f"/events/stream?run_id={seeded.shop_runs[1]}"
+    assert live_stream(tree) == ("/events/stream", {"run_id": str(seeded.shop_runs[1])})
 
 
 def test_failed_run_shows_its_error_and_incident(client: TestClient, seeded: Seeded) -> None:

@@ -6,6 +6,7 @@ These tests write rows, so they use `clean_db` and live apart from the seeded pa
 from __future__ import annotations
 
 import hashlib
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -32,7 +33,7 @@ HOSTILE_PAGE = (
 
 
 def main(html: str) -> str:
-    return html.split("<main>", 1)[1].split("</main>", 1)[0]
+    return re.split(r"<main\b[^>]*>", html, maxsplit=1)[1].split("</main>", 1)[0]
 
 
 @pytest.fixture

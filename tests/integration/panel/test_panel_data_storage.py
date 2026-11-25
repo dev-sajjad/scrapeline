@@ -22,7 +22,7 @@ pytestmark = pytest.mark.integration
 
 
 def main(html: str) -> str:
-    return html.split("<main>", 1)[1].split("</main>", 1)[0]
+    return re.split(r"<main\b[^>]*>", html, maxsplit=1)[1].split("</main>", 1)[0]
 
 
 def section(html: str, anchor: str) -> str:

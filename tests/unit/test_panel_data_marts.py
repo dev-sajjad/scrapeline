@@ -302,7 +302,7 @@ def client(warehouse: Path) -> TestClient:
 
 
 def main(html: str) -> str:
-    return html.split("<main>", 1)[1].split("</main>", 1)[0]
+    return re.split(r"<main\b[^>]*>", html, maxsplit=1)[1].split("</main>", 1)[0]
 
 
 def test_marts_index_lists_tables_with_rows_and_columns(client: TestClient) -> None:
