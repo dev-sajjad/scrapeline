@@ -266,18 +266,28 @@ def _health_rows() -> list[dict[str, Any]]:
     return rows
 
 
+def _insert(con: duckdb.DuckDBPyConnection, mart: str, rows: list[dict[str, Any]]) -> None:
+    names = [n for n, _ in WAREHOUSE_DDL[mart]]
+    con.executemany(
+        f"INSERT INTO {mart} VALUES ({', '.join('?' for _ in names)})",
+        [[row[n] for n in names] for row in rows],
+    )
+
+
 def build_warehouse(path: Path, marts: tuple[str, ...] = tuple(WAREHOUSE_DDL)) -> None:
     with duckdb.connect(str(path)) as con:
         con.execute("SET TimeZone = 'UTC'")
         for mart in marts:
             columns = WAREHOUSE_DDL[mart]
             con.execute(f"CREATE TABLE {mart} ({', '.join(f'{n} {t}' for n, t in columns)})")
-            rows = HISTORY if mart == "product_price_history" else _health_rows()
-            names = [n for n, _ in columns]
-            con.executemany(
-                f"INSERT INTO {mart} VALUES ({', '.join('?' for _ in names)})",
-                [[row[n] for n in names] for row in rows],
-            )
+            _insert(con, mart, HISTORY if mart == "product_price_history" else _health_rows())
+
+
+def add_history(path: Path, rows: list[dict[str, Any]]) -> None:
+    """More product versions in a built warehouse, for a test that needs a special case."""
+    with duckdb.connect(str(path)) as con:
+        con.execute("SET TimeZone = 'UTC'")
+        _insert(con, "product_price_history", rows)
 
 
 def client_for(warehouse: Path) -> TestClient:
@@ -369,6 +379,22 @@ def test_product_page_shows_removals_and_stock_changes(client: TestClient) -> No
     knife = main(client.get("/marts/price-history/shop/SIM-0004").text)
     stock = knife.split("<h2>Stock changes</h2>", 1)[1].split("<h2>", 1)[0]
     assert "yes → no" in stock
+
+
+def test_unknown_stock_is_not_shown_as_out_of_stock(warehouse: Path) -> None:
+    # Availability was not parsed on the first and last observation: unknown, not "no".
+    teapot: list[tuple[str, str | None, bool | None]] = [
+        ("insert", "20.00", None),
+        ("update", "20.00", True),
+        ("update", "20.00", None),
+    ]
+    add_history(warehouse, _product(6, "SIM-0009", "Teapot", teapot))
+    body = main(client_for(warehouse).get("/marts/price-history/shop/SIM-0009").text)
+    stock = body.split("<h2>Stock changes</h2>", 1)[1].split("<h2>", 1)[0]
+    unknown = '<span class="empty">—</span>'
+    assert re.findall(r"<td>(.*?)</td>", stock) == [f"yes → {unknown}", f"{unknown} → yes"]
+    versions = body.split("<h2>Versions</h2>", 1)[1]
+    assert "<td>no</td>" not in versions and versions.count(f"<td>{unknown}</td>") == 2
 
 
 def test_product_ids_that_are_urls_work(client: TestClient) -> None:
