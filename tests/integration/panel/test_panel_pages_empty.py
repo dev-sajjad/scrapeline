@@ -268,3 +268,26 @@ def add_dead_job(conn: Connection, source_id: str, died: datetime) -> None:
             updated_at=died,
         )
     )
+
+
+@pytest.mark.parametrize(
+    ("usage", "shown"),
+    [
+        ({"allow_pii": True, "purpose": "Contact sellers"}, "kept allow_pii with a stated purpose"),
+        (
+            {"allow_pii": True, "purpose": ""},
+            "blanked before storage no purpose allow_pii is set, but personal data is kept only"
+            " with a purpose",
+        ),
+        ({"allow_pii": False, "purpose": "Price tracking"}, "blanked before storage"),
+        ({"allow_pii": "yes please"}, "blanked before storage the usage block does not validate"),
+    ],
+)
+def test_personal_data_row_follows_the_record_store(
+    client: TestClient, clean_db: Engine, usage: dict[str, Any], shown: str
+) -> None:
+    with clean_db.begin() as conn:
+        add_source(conn, "pii", config={"usage": usage})
+    tree = HTMLParser(client.get("/sources/pii").text)
+    row = next(pair for pair in tree.css("dl.kv > div") if text_of(pair, "dt") == "Personal data")
+    assert text_of(row, "dd") == shown

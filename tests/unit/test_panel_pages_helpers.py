@@ -13,7 +13,12 @@ from scrapeline.serve.panel import filters
 from scrapeline.serve.panel.deps import templates
 from scrapeline.serve.panel.pages.health import lake_freshness, verdict
 from scrapeline.serve.panel.pages.runs import load_rows
-from scrapeline.serve.panel.pages.sources import attention, config_view, is_overdue
+from scrapeline.serve.panel.pages.sources import (
+    attention,
+    config_view,
+    is_overdue,
+    personal_data,
+)
 
 NOW = datetime(2026, 11, 25, 12, 0, tzinfo=UTC)
 QUIET = {
@@ -105,6 +110,27 @@ def test_config_view_flags_the_placeholder_review_date() -> None:
     )
     assert not view["terms_unreviewed"]
     assert view["locale"] == {"language": "en"}
+
+
+@pytest.mark.parametrize(
+    ("usage", "expected"),
+    [
+        ({"allow_pii": True, "purpose": "Contact the seller"}, "kept"),
+        # The record store keeps personal data only with a purpose as well.
+        ({"allow_pii": True}, "no-purpose"),
+        ({"allow_pii": True, "purpose": "   "}, "no-purpose"),
+        ({"allow_pii": False, "purpose": "Price tracking"}, "blanked"),
+        ({}, "blanked"),
+        (None, "blanked"),
+        # Usage that does not validate grants nothing, as in the lake export.
+        ({"allow_pii": "maybe", "purpose": "x"}, "unreadable"),
+        ({"allow_pii": True, "purpose": "x", "unknown": 1}, "unreadable"),
+        ("allow everything", "unreadable"),
+    ],
+)
+def test_personal_data_follows_the_record_store_rule(usage: object, expected: str) -> None:
+    assert personal_data(usage) == expected
+    assert config_view({"usage": usage})["personal_data"] == expected
 
 
 def test_load_rows_skip_malformed_stats() -> None:

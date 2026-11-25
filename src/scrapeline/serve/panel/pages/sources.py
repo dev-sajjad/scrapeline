@@ -8,11 +8,13 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
+from pydantic import ValidationError
 from sqlalchemy import ColumnElement, Connection, case, func, or_, select
 from sqlalchemy.dialects.postgresql import distinct_on
 
 from scrapeline.ops.worker import CADENCE
-from scrapeline.registry.config import UNREVIEWED_TERMS, SourceConfig
+from scrapeline.pipeline.records import keeps_personal_data
+from scrapeline.registry.config import UNREVIEWED_TERMS, SourceConfig, UsageRights
 from scrapeline.serve.panel.deps import EngineDep, PageDep, render
 from scrapeline.store import tables as t
 
@@ -336,7 +338,24 @@ def config_view(config: Mapping[str, Any] | None) -> dict[str, Any]:
         "allowed_hosts": config.get("allowed_hosts") or [],
         "locale": {k: v for k, v in (config.get("locale") or {}).items() if v is not None},
         "usage": config.get("usage") or {},
+        "personal_data": personal_data(config.get("usage")),
         "terms_checked": terms,
         "terms_unreviewed": terms is None or str(terms) == UNREVIEWED_TERMS.isoformat(),
         "legal_notes": legal.get("notes"),
     }
+
+
+def personal_data(usage: object) -> str:
+    """What the pipeline does with personal-data fields under the stored usage rights.
+
+    'kept' needs allow_pii and a purpose; 'no-purpose' is allow_pii without one, which still
+    blanks them. Usage that does not validate grants nothing, as in the lake export, and is
+    reported as 'unreadable'.
+    """
+    try:
+        rights = UsageRights.model_validate(usage or {})
+    except ValidationError:
+        return "unreadable"
+    if keeps_personal_data(rights):
+        return "kept"
+    return "no-purpose" if rights.allow_pii else "blanked"
