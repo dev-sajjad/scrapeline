@@ -104,9 +104,10 @@ HEALTH_DAYS = 30
 MAX_SOURCE_OPTIONS = 200
 MINUS = chr(0x2212)  # a true minus sign, as wide as the plus
 
-CHART_WIDTH = 720
-CHART_HEIGHT = 260
-CHART_LEFT, CHART_RIGHT, CHART_TOP, CHART_BOTTOM = 84, 16, 16, 36
+# Close to the content width on a laptop, so 13-unit labels render at about 13 px there.
+CHART_WIDTH = 960
+CHART_HEIGHT = 300
+CHART_LEFT, CHART_RIGHT, CHART_TOP, CHART_BOTTOM = 100, 16, 20, 40
 
 # Optional filters as fixed SQL: a NULL parameter switches its condition off.
 _PRODUCT_FILTERS = (
@@ -471,6 +472,9 @@ def price_chart(
     )
     if removals:
         description += f", removed {removals} {'time' if removals == 1 else 'times'}"
+    # The axis labels shrink with the chart on a phone; the caption keeps the range legible.
+    if dearest != cheapest:
+        description += f"; highest {y_ticks[0][1]}, lowest {y_ticks[-1][1]}"
     return Chart(
         width=CHART_WIDTH,
         height=CHART_HEIGHT,

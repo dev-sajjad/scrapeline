@@ -23,6 +23,11 @@
 {%- if f and f.pii %} <abbr title="Personal data: stored only when the source's usage allows it">personal</abbr>{% endif -%}
 {%- endmacro %}
 
+{# A field name that may wrap after its underscores, so narrow columns stay narrow. #}
+{% macro breakable(name) -%}
+{%- for part in name.split("_") %}{{ part }}{% if not loop.last %}_<wbr>{% endif %}{% endfor -%}
+{%- endmacro %}
+
 {% macro raw_link(sha) -%}
 {%- if sha -%}<a class="mono" href="/storage/raw/{{ sha }}">{{ sha | short }}</a>{%- else -%}<span class="empty">—</span>{%- endif -%}
 {%- endmacro %}

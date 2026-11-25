@@ -16,10 +16,13 @@ from sqlalchemy import create_engine
 from scrapeline.catalog.datasets import FieldDef
 from scrapeline.serve.panel.app import create_app
 from scrapeline.serve.panel.pages.data import (
+    DatasetInfo,
     diff_payloads,
     format_value,
     like_pattern,
+    list_columns,
     parse_record_id,
+    short_url,
     url_cell,
     version_views,
 )
@@ -72,6 +75,33 @@ def test_only_http_urls_become_links() -> None:
         assert url_cell(hostile).href is None
     # Typed models keep URLs in text fields named *_url.
     assert format_value("https://a.example/agenda.pdf", "text", name="agenda_url").href
+
+
+def test_long_urls_keep_their_host_and_last_segment() -> None:
+    fits = "shop.example/a/b/espresso-cups.html"
+    assert short_url(fits, 48) == fits
+    assert (
+        short_url("shop-sim.test/shop-sim/products/espresso-cups.html", 36)
+        == "shop-sim.test/…/espresso-cups.html"
+    )
+    tail = short_url("legistar2.granicus.com/seattle/meetings/2026/11/6915_A_Agenda.pdf", 36)
+    assert tail == "legistar2.granicus.com/…/6915_A_Age…" and len(tail) == 36
+    # No path to elide, or no room for one: cut the end.
+    assert short_url("seattle.legistar.com/MeetingDetail.aspx?LEGID=6760&GID=393", 36) == (
+        "seattle.legistar.com/MeetingDetail.…"
+    )
+    assert len(format_value("https://" + "x" * 100, "url", compact=True).text) == 36
+
+
+def test_record_lists_show_keys_then_filled_fields_up_to_a_limit() -> None:
+    fields = {f"f{i}": FieldDef() for i in range(12)} | {"k": FieldDef(type="url", key=True)}
+    info = DatasetInfo("wide", 1, "generic", "core", "", fields, 1, 1)
+    values = [{f"f{i}": "x" for i in range(12) if i != 3}]
+    shown, more, empty = list_columns(info, list(fields), values)
+    assert len(shown) == 8 and "k" in shown and "f3" not in shown
+    assert shown[:7] == ["f0", "f1", "f2", "f4", "f5", "f6", "f7"]
+    assert more == ["f8", "f9", "f10", "f11"]
+    assert empty == ["f3"]
 
 
 def test_diff_lists_only_changed_fields_in_field_order() -> None:
@@ -218,7 +248,7 @@ def test_price_chart_steps_through_each_version() -> None:
     history = _history((0, "insert", "14.99"), (24, "update", "16.49"), (48, "update", "13.99"))
     chart = price_chart(history, "Espresso cups", now=T0 + timedelta(hours=72))
     assert chart is not None
-    assert len(chart.paths) == 1 and chart.paths[0].startswith("M 84.0 ")
+    assert len(chart.paths) == 1 and chart.paths[0].startswith("M 100.0 ")
     assert chart.paths[0].count(" V ") == 2  # two price changes
     assert chart.points[0].label == "14.99 GBP from 2026-11-01 09:00 UTC"
     assert [label for _, label in chart.y_ticks] == ["16.49 GBP", "13.99 GBP"]

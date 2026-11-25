@@ -48,7 +48,7 @@ def client(clean_db: Engine, settings: Settings) -> TestClient:
 @pytest.mark.parametrize(
     ("path", "says"),
     [
-        ("/data", "not synced"),  # dataset types still come from the registry files
+        ("/data", "not&nbsp;synced"),  # dataset types still come from the registry files
         ("/data/product", "No records yet."),
         ("/data/meeting", "No records yet."),
         ("/storage", "Nothing fetched yet."),

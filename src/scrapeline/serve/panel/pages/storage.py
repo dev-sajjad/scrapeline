@@ -192,11 +192,32 @@ def _database_tables(conn: Connection) -> list[Any]:
     return list(conn.execute(query))
 
 
-def _lake(settings: Settings) -> tuple[dict[str, Any] | None, str | None]:
+def _lake(settings: Settings) -> tuple[list[dict[str, Any]], str | None]:
+    """Per lake table: mode, files, rows, last export and watermark, with times parsed."""
     try:
-        return lake_status(settings.lake_dir), None
+        status = lake_status(settings.lake_dir)
     except (ConfigError, duckdb.Error, OSError) as exc:
-        return None, str(exc)
+        return [], str(exc)
+    rows = []
+    for name, entry in sorted(status["tables"].items()):
+        last = entry.get("last_export") or {}
+        rows.append(
+            {
+                "name": name,
+                "mode": entry["mode"],
+                "files": entry["files"],
+                "rows": entry["rows"],
+                "export_id": last.get("export_id"),
+                "exported_at": _parse_time(last.get("at")),
+                "exported_rows": last.get("rows"),
+                "watermark": _parse_time(entry.get("watermark")),
+            }
+        )
+    return rows, None
+
+
+def _parse_time(value: str | None) -> datetime | None:
+    return datetime.fromisoformat(value) if value else None
 
 
 def _file_info(path: Path) -> dict[str, Any] | None:
@@ -213,9 +234,8 @@ def storage(request: Request, engine: EngineDep, settings: SettingsDep) -> HTMLR
         by_source = _raw_store_by_source(conn)
         recent = _recent_raw(conn)
         db_tables = _database_tables(conn)
-    lake, lake_problem = _lake(settings)
-    lake_tables = (lake or {}).get("tables", {})
-    exported = any(entry["files"] or "last_export" in entry for entry in lake_tables.values())
+    lake_tables, lake_problem = _lake(settings)
+    exported = any(row["files"] or row["exported_at"] for row in lake_tables)
     return render(
         request,
         "storage/index.html",

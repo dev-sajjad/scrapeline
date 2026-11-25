@@ -70,12 +70,12 @@ def test_data_lists_every_dataset_type_with_its_records(client: TestClient) -> N
     assert '<td class="num">21</td>' in product  # current
     assert '<td class="num">0</td>' in product  # removed: the desk lamp came back
     assert '<a href="/sources/shop-sim">shop-sim</a>' in product
-    assert "not synced" not in product
+    assert "not&nbsp;synced" not in product
     meeting = rows["meeting"]
     assert "typed" in meeting and '<td class="num">25</td>' in meeting
     assert '<a href="/sources/legistar-testcity">legistar-testcity</a>' in meeting
     # Defined in the registry, never synced or used.
-    assert "not synced" in rows["article"] and "never" in rows["article"]
+    assert "not&nbsp;synced" in rows["article"] and "never" in rows["article"]
 
 
 def test_product_records_are_listed_with_typed_columns(client: TestClient) -> None:
@@ -139,6 +139,9 @@ def test_typed_meetings_come_from_their_table(client: TestClient) -> None:
     assert body.count('href="/data/meeting/') == 25
     assert 'name="state"' not in body  # typed tables keep no removals
     assert "Select Budget Committee" in body
+    # Ten fields: the first eight that have values show, the rest wait on the record page.
+    assert "More fields on each record's page: minutes_url, source_modified_at." in body
+    assert "body_<wbr>external_<wbr>id" in body
     assert count_text(body, "<td>09:30</td>") >= 1
     filtered = main(client.get("/data/meeting", params={"q": "budget committee"}).text)
     assert 0 < filtered.count('href="/data/meeting/') < 25

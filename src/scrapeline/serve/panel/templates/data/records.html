@@ -40,7 +40,7 @@
       <th scope="col">Record</th>
       <th scope="col">Source</th>
       {% for name, f in fields %}
-      <th scope="col"{% if f.type in ("int", "float", "decimal", "money") %} class="num"{% endif %}>{{ name }}{{ dm.field_flags(f) }}</th>
+      <th scope="col"{% if f.type in ("int", "float", "decimal", "money") %} class="num"{% endif %}>{{ dm.breakable(name) }}{{ dm.field_flags(f) }}</th>
       {% endfor %}
       {% if not info.typed %}<th scope="col">State</th>{% endif %}
       <th scope="col">Last seen</th>
@@ -62,8 +62,11 @@
   </tbody>
 </table>
 {{ pager(request, page, total) }}
-{% if hidden %}
-<p class="empty">Not shown because they are empty on this page: {{ hidden | join(", ") }}.</p>
+{% if more %}
+<p class="empty">More fields on each record's page: {{ more | join(", ") }}.</p>
+{% endif %}
+{% if empty_fields %}
+<p class="empty">Not shown because they are empty on this page: {{ empty_fields | join(", ") }}.</p>
 {% endif %}
 {% elif filters.q or filters.source_id or filters.state != "current" %}
 {{ empty("No records match these filters.") }}

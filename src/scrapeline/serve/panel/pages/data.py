@@ -54,6 +54,10 @@ MAX_SOURCE_OPTIONS = 200
 MAX_VERSIONS = 100
 MAX_TEXT = 160
 MAX_URL_TEXT = 48
+# Record lists stay readable on a laptop screen: shorter values and at most this many fields.
+LIST_TEXT = 80
+LIST_URL_TEXT = 36
+LIST_FIELDS = 8
 MAX_ID = 2**63 - 1
 SOURCES_SHOWN = 5
 
@@ -142,8 +146,9 @@ class VersionView:
     compared_with: int | None
 
 
-def format_value(value: Any, field_type: str, *, name: str = "") -> Cell:
-    """Format one stored value by its dataset field type."""
+def format_value(value: Any, field_type: str, *, name: str = "", compact: bool = False) -> Cell:
+    """Format one stored value by its dataset field type; `compact` for record lists."""
+    text_limit = LIST_TEXT if compact else MAX_TEXT
     if value is None or value == "":
         return EMPTY_CELL
     if field_type == "money" and isinstance(value, Mapping):
@@ -156,25 +161,36 @@ def format_value(value: Any, field_type: str, *, name: str = "") -> Cell:
         return Cell(_decimal_text(value))
     if field_type == "datetime":
         when = _as_datetime(value)
-        return Cell(filters.dt(when)) if when else _text_cell(str(value))
+        return Cell(filters.dt(when)) if when else _text_cell(str(value), text_limit)
     if field_type == "date":
         return Cell(value.isoformat() if isinstance(value, date) else str(value))
     if field_type == "time":
         return Cell(_time_text(value))
     if field_type == "url" or (field_type == "text" and _looks_like_url_field(name)):
-        return url_cell(str(value))
+        return url_cell(str(value), LIST_URL_TEXT if compact else MAX_URL_TEXT)
     if isinstance(value, Mapping | list):
-        return _text_cell(json.dumps(value, ensure_ascii=False, sort_keys=True))
-    return _text_cell(str(value))
+        return _text_cell(json.dumps(value, ensure_ascii=False, sort_keys=True), text_limit)
+    return _text_cell(str(value), text_limit)
 
 
-def url_cell(value: str) -> Cell:
+def url_cell(value: str, limit: int = MAX_URL_TEXT) -> Cell:
     """A URL shortened for display; linked only when it is http(s)."""
-    shown = re.sub(r"^https?://", "", value, flags=re.IGNORECASE)
-    if len(shown) > MAX_URL_TEXT:
-        shown = shown[: MAX_URL_TEXT - 1] + "…"
+    shown = short_url(re.sub(r"^https?://", "", value, flags=re.IGNORECASE), limit)
     href = value if value.lower().startswith(("http://", "https://")) else None
     return Cell(shown, href=href, full=value if shown != value else None)
+
+
+def short_url(text: str, limit: int) -> str:
+    """Keep the host and the last path segment, which say most: shop.example/…/mug.html."""
+    if len(text) <= limit:
+        return text
+    host, _, path = text.partition("/")
+    parts = path.rstrip("/").rsplit("/", 1)
+    room = limit - len(host) - 3
+    if len(parts) < 2 or room < 8:
+        return text[: limit - 1] + "…"
+    tail = parts[1] if len(parts[1]) <= room else parts[1][: room - 1] + "…"
+    return f"{host}/…/{tail}"
 
 
 def diff_payloads(
@@ -250,10 +266,10 @@ def parse_record_id(value: str) -> int:
     return int(value)
 
 
-def _text_cell(text: str) -> Cell:
-    if len(text) <= MAX_TEXT:
+def _text_cell(text: str, limit: int = MAX_TEXT) -> Cell:
+    if len(text) <= limit:
         return Cell(text)
-    return Cell(text[: MAX_TEXT - 1] + "…", full=text)
+    return Cell(text[: limit - 1] + "…", full=text)
 
 
 def _decimal_text(value: Any) -> str:
@@ -510,13 +526,25 @@ def _list_typed(conn: Connection, info: DatasetInfo, rf: RecordFilters, page: Pa
     return Listing(total, list(rows), values, _source_options(conn, table))
 
 
-def _visible_fields(info: DatasetInfo, values: Sequence[Mapping[str, Any]]) -> list[str]:
-    """Key fields, and every field that has a value somewhere on this page."""
-    return [
+def list_columns(
+    info: DatasetInfo, columns: Sequence[str], values: Sequence[Mapping[str, Any]]
+) -> tuple[list[str], list[str], list[str]]:
+    """Which fields a record list shows: (shown, left for the record page, empty here).
+
+    Key fields always show; other fields show when they have a value on this page, in
+    definition order, up to LIST_FIELDS in all.
+    """
+    filled = [
         name
-        for name, f in info.fields.items()
-        if f.key or any(v.get(name) not in (None, "") for v in values)
+        for name in columns
+        if info.fields[name].key or any(v.get(name) not in (None, "") for v in values)
     ]
+    keys = [name for name in filled if info.fields[name].key]
+    others = [name for name in filled if not info.fields[name].key]
+    chosen = set(keys + others[: max(LIST_FIELDS - len(keys), 0)])
+    shown = [name for name in filled if name in chosen]
+    more = [name for name in filled if name not in chosen]
+    return shown, more, [name for name in columns if name not in filled]
 
 
 @router.get("/data/{dataset}", response_class=HTMLResponse)
@@ -535,7 +563,7 @@ def records(
         info = _dataset(conn, settings, dataset)
         listing = (_list_typed if info.typed else _list_generic)(conn, info, rf, page)
     columns = [name for name in info.fields if not info.typed or name in TABLE_FOR[info.name].c]
-    visible = [name for name in _visible_fields(info, listing.values) if name in columns]
+    visible, more, empty = list_columns(info, columns, listing.values)
     rows = [
         {
             "id": row.id,
@@ -543,7 +571,9 @@ def records(
             "source_id": row.source_id,
             "last_seen_at": row.last_seen_at,
             "removed_at": None if info.typed else row.removed_at,
-            "cells": [format_value(v.get(n), info.fields[n].type, name=n) for n in visible],
+            "cells": [
+                format_value(v.get(n), info.fields[n].type, name=n, compact=True) for n in visible
+            ],
         }
         for row, v in zip(listing.rows, listing.values, strict=True)
     ]
@@ -554,7 +584,8 @@ def records(
             "title": f"{info.name} · Data",
             "info": info,
             "fields": [(name, info.fields[name]) for name in visible],
-            "hidden": [name for name in columns if name not in visible],
+            "more": more,
+            "empty_fields": empty,
             "rows": rows,
             "total": listing.total,
             "page": page,

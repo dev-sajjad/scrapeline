@@ -122,14 +122,14 @@ new files on every export; snapshot tables are rewritten whole.</p>
     </tr>
   </thead>
   <tbody>
-    {% for name, entry in lake_tables | dictsort %}
+    {% for row in lake_tables %}
     <tr>
-      <th scope="row" class="mono">{{ name }}</th>
-      <td>{{ entry.mode }}</td>
-      <td class="num">{{ entry.files | number }}</td>
-      <td class="num">{{ entry.rows | number }}</td>
-      <td>{% if entry.last_export %}<span title="{{ entry.last_export.export_id }}">{{ entry.last_export.at }}</span> ({{ entry.last_export.rows | number }} rows){% else %}<span class="empty">never</span>{% endif %}</td>
-      <td class="mono">{{ entry.watermark or "—" }}</td>
+      <th scope="row" class="mono">{{ row.name }}</th>
+      <td>{{ row.mode }}</td>
+      <td class="num">{{ row.files | number }}</td>
+      <td class="num">{{ row.rows | number }}</td>
+      <td>{% if row.exported_at %}<span title="Export {{ row.export_id }}">{{ row.exported_at | dt }}</span> <span class="empty">({{ row.exported_rows | number }} rows written)</span>{% else %}<span class="empty">never</span>{% endif %}</td>
+      <td>{{ row.watermark | dt }}</td>
     </tr>
     {% endfor %}
   </tbody>

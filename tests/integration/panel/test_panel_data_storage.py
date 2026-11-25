@@ -77,6 +77,8 @@ def test_storage_shows_the_exported_lake(seeded: Seeded, tmp_path: Path) -> None
     cells = re.findall(r'<td class="num">([\d,]+)</td>', row)
     assert int(cells[0]) >= 1 and cells[1] == "32"  # files, rows
     assert "append" in row and "never" not in row
+    assert re.search(r"\d{4}-\d\d-\d\d \d\d:\d\d UTC</span>", row)  # not a raw ISO string
+    assert "32 rows written" in row
     snapshot = lake.split('<th scope="row" class="mono">sources</th>', 1)[1].split("</tr>")[0]
     assert "snapshot" in snapshot and '<td class="num">2</td>' in snapshot
 
