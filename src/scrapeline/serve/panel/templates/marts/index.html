@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% from "_macros.html" import empty %}
+{% block content %}
+<h1>Marts</h1>
+<p>Analytics tables that dbt builds from the lake. Read-only, from
+<span class="mono">{{ path }}</span> ({{ size | bytes }}, built {{ built | dt }}, {{ built | ago }}).</p>
+
+{% if rows %}
+<table>
+  <thead>
+    <tr>
+      <th scope="col">Mart</th>
+      <th scope="col" class="num">Rows</th>
+      <th scope="col">Columns</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <th scope="row">
+        {% if row.page %}<a href="{{ row.page }}">{{ row.name }}</a>{% else %}<span class="mono">{{ row.name }}</span>{% endif %}
+        {% if row.description %}<br><span class="empty">{{ row.description }}</span>{% endif %}
+      </th>
+      <td class="num">{{ row.rows | number }}</td>
+      <td>
+        <details>
+          <summary>{{ row.columns | length }} columns</summary>
+          <ul>
+            {% for column in row.columns %}
+            <li><code>{{ column.column_name }}</code> <span class="empty">{{ column.data_type | lower }}</span></li>
+            {% endfor %}
+          </ul>
+        </details>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+{{ empty("The warehouse has no tables yet. Build them with: make dbt") }}
+{% endif %}
+{% endblock %}

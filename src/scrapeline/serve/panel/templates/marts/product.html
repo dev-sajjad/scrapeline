@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% from "_macros.html" import empty %}
+{% from "marts/_chart.html" import step_chart %}
+{% import "data/_macros.html" as dm %}
+{% block content %}
+<nav aria-label="Breadcrumb"><a href="/marts">Marts</a> / <a href="/marts/price-history">price history</a> / {{ product.external_id | short(32) }}</nav>
+<h1>{{ product_title }}</h1>
+<p>
+  <a href="/sources/{{ product.source_id }}">{{ product.source_id }}</a>{% if product.source_name %} · {{ product.source_name }}{% endif %}
+  · <span class="mono">{{ product.external_id }}</span>
+  · <a href="/data/product/{{ product.record_id }}">record lineage</a>
+  {% if product.url and product.url.lower().startswith(("http://", "https://")) %}· <a href="{{ product.url }}" rel="noopener noreferrer nofollow">product page</a>{% endif %}
+</p>
+
+<h2>Price over time</h2>
+{% if chart %}
+{{ step_chart(chart) }}
+{% else %}
+{{ empty("No price was ever observed for this product.") }}
+{% endif %}
+
+<h2>Stock changes</h2>
+{% if stock_changes %}
+<table>
+  <thead>
+    <tr>
+      <th scope="col">When</th>
+      <th scope="col">In stock</th>
+      <th scope="col" class="num">Quantity change</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in stock_changes %}
+    <tr>
+      <th scope="row">{{ row.valid_from | dt }}</th>
+      <td>{{ "yes" if row.previous_in_stock else "no" }} → {{ "yes" if row.in_stock else "no" }}</td>
+      <td class="num">{{ row.stock_quantity_change if row.stock_quantity_change is not none else "—" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+{{ empty("Stock availability has not changed.") }}
+{% endif %}
+
+<h2>Versions</h2>
+<table>
+  <thead>
+    <tr>
+      <th scope="col" class="num">Version</th>
+      <th scope="col">Change</th>
+      <th scope="col">Valid from</th>
+      <th scope="col">Valid to</th>
+      <th scope="col" class="num">Price</th>
+      <th scope="col" class="num">Change</th>
+      <th scope="col" class="num">%</th>
+      <th scope="col">In stock</th>
+      <th scope="col">Raw</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in history %}
+    <tr>
+      <th scope="row" class="num">{{ row.version }}</th>
+      <td>{{ dm.change(row.change_type) }}</td>
+      <td>{{ row.valid_from | dt }}</td>
+      <td>{% if row.valid_to %}{{ row.valid_to | dt }}{% else %}<span class="empty">{{ "still removed" if row.is_removed else "current" }}</span>{% endif %}</td>
+      <td class="num">{{ row.new }}</td>
+      <td class="num">{{ row.change }}</td>
+      <td class="num">{{ row.change_pct }}</td>
+      <td>{% if row.in_stock is none %}<span class="empty">—</span>{% elif row.in_stock %}yes{% else %}no{% endif %}</td>
+      <td>{{ dm.raw_link(row.raw_sha256) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

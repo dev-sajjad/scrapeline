@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge, empty %}
+{% import "data/_macros.html" as dm %}
+{% block content %}
+<nav aria-label="Breadcrumb"><a href="/data">Data</a> / <a href="/data/{{ info.name }}">{{ info.name }}</a> / {{ row.id }}</nav>
+<h1>{{ info.name }} <span class="mono">{{ row.external_id | short(48) }}</span>
+  {% if removed_at %}{{ badge("removed") }}{% endif %}</h1>
+{% if removed_at %}
+<p>Not found by a complete crawl on {{ removed_at | dt }}. The values below are the last ones observed.</p>
+{% endif %}
+
+<h2>Identity and provenance</h2>
+<table>
+  <tbody>
+    <tr><th scope="row">Source</th><td><a href="/sources/{{ row.source_id }}">{{ row.source_id }}</a>{% if row.source_name %} <span class="empty">{{ row.source_name }}</span>{% endif %}</td></tr>
+    <tr><th scope="row">External id</th><td class="mono">{{ row.external_id }}</td></tr>
+    <tr><th scope="row">Canonical URL</th><td>{% if canonical %}{{ dm.cell(canonical) }}{% else %}<span class="empty">—</span>{% endif %}</td></tr>
+    <tr><th scope="row">Content hash</th><td class="mono">{{ row.content_hash }}</td></tr>
+    <tr><th scope="row">Schema version</th><td>v{{ row.schema_version }}</td></tr>
+    <tr><th scope="row">First seen</th><td>{{ row.first_seen_at | dt }}</td></tr>
+    <tr><th scope="row">Last seen</th><td>{{ row.last_seen_at | dt }}</td></tr>
+    <tr><th scope="row">Fetched</th><td>{{ row.fetched_at | dt }}</td></tr>
+    <tr><th scope="row">Run</th><td>{{ dm.run_link(row.run_id) }}</td></tr>
+    <tr><th scope="row">Scraper version</th><td>{% if row.scraper_version_id %}#{{ row.scraper_version_id }} <code>{{ row.scraper_adapter }}</code> <span class="mono" title="{{ row.scraper_code_hash }}">{{ row.scraper_code_hash | short }}</span> by {{ row.scraper_author }}{% else %}<span class="empty">—</span>{% endif %}</td></tr>
+    <tr><th scope="row">Raw response</th><td>{{ dm.raw_link(row.raw_sha256) }}</td></tr>
+  </tbody>
+</table>
+
+<h2>{% if removed_at %}Last observed values{% else %}Current values{% endif %}</h2>
+{% if current %}
+<table>
+  <thead><tr><th scope="col">Field</th><th scope="col">Type</th><th scope="col">Value</th></tr></thead>
+  <tbody>
+    {% for name, f, c in current %}
+    <tr><th scope="row">{{ name }}{{ dm.field_flags(f) }}</th><td>{{ f.type if f else "unknown" }}</td><td>{{ dm.cell(c) }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+{{ empty("This record has no stored values.") }}
+{% endif %}
+
+<h2>History</h2>
+{% if info.typed %}
+<p>Typed tables keep the current row only, so there is no version history. Every earlier
+response is still in the raw store, and the row can be rebuilt from it.</p>
+{% elif versions %}
+<p>{{ total_versions | number }} {% if total_versions == 1 %}version{% else %}versions{% endif %}, newest first.
+A version is valid from its start until the next version starts.
+{% if total_versions > versions | length %}Showing the latest {{ versions | length }}.{% endif %}</p>
+<table>
+  <thead>
+    <tr>
+      <th scope="col" class="num">Version</th>
+      <th scope="col">Change</th>
+      <th scope="col">Valid from</th>
+      <th scope="col">Valid to</th>
+      <th scope="col">Run</th>
+      <th scope="col">Raw</th>
+      <th scope="col">What changed</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for v in versions %}
+    <tr>
+      <th scope="row" class="num">{{ v.version }}<br><span class="empty">schema v{{ v.schema_version }}</span></th>
+      <td>{{ dm.change(v.change_type) }}</td>
+      <td>{{ v.valid_from | dt }}</td>
+      <td>{% if v.valid_to %}{{ v.valid_to | dt }}{% elif v.change_type == "removed" %}<span class="empty">still removed</span>{% else %}<span class="empty">current</span>{% endif %}</td>
+      <td>{{ dm.run_link(v.run_id) }}</td>
+      <td>{{ dm.raw_link(v.raw_sha256) }}</td>
+      <td>
+        {% if v.change_type == "removed" %}
+        <span class="empty">Not seen in a complete crawl; a removal has no values.</span>
+        {% elif v.changes is none %}
+        <span class="empty">{% if v.version == 1 %}First version.{% else %}Earlier versions are not shown.{% endif %}</span>
+        {% elif not v.changes %}
+        <span class="empty">No field changes since version {{ v.compared_with }}.</span>
+        {% else %}
+        {% if v.compared_with != v.version - 1 %}<span class="empty">Compared with version {{ v.compared_with }}, the last one observed.</span>{% endif %}
+        <ul>
+          {% for change in v.changes %}
+          <li><code>{{ change.name }}</code>: <del>{{ dm.cell(change.old) }}</del> → <ins>{{ dm.cell(change.new) }}</ins></li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+{{ empty("No versions recorded.") }}
+{% endif %}
+{% endblock %}

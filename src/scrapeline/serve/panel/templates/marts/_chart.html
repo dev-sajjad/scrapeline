@@ -1,0 +1,46 @@
+{# Server-rendered step chart. Presentation attributes only: the CSP allows no inline styles.
+   The blue passes 3:1 on both the light and the dark panel surface; text uses the ink colour. #}
+{% macro step_chart(c) -%}
+<div class="price-chart">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {{ c.width }} {{ c.height }}" width="100%" role="img" aria-labelledby="price-chart-title price-chart-desc">
+    <title id="price-chart-title">{{ c.title }}</title>
+    <desc id="price-chart-desc">{{ c.description }}</desc>
+    <g class="gaps" fill="currentColor" fill-opacity="0.08">
+      {% for x1, x2 in c.gaps %}
+      <rect x="{{ x1 }}" y="{{ c.plot[1] }}" width="{{ [x2 - x1, 2] | max | round(1) }}" height="{{ c.plot[3] - c.plot[1] }}"><title>Removed: not found in a complete crawl</title></rect>
+      {% endfor %}
+    </g>
+    <g class="grid" stroke="currentColor" stroke-opacity="0.18" stroke-width="1" fill="none">
+      {% for y, label in c.y_ticks %}
+      <line x1="{{ c.plot[0] }}" x2="{{ c.plot[2] }}" y1="{{ y }}" y2="{{ y }}"/>
+      {% endfor %}
+    </g>
+    <g class="line" fill="none" stroke="#2a78d6" stroke-width="2" stroke-linejoin="round" stroke-linecap="round">
+      {% for d in c.paths %}
+      <path d="{{ d }}"/>
+      {% endfor %}
+    </g>
+    <g class="points" fill="#2a78d6">
+      {% for p in c.points %}
+      <g>
+        <title>{{ p.label }}</title>
+        <circle cx="{{ p.x }}" cy="{{ p.y }}" r="12" fill-opacity="0"/>
+        <circle cx="{{ p.x }}" cy="{{ p.y }}" r="4"/>
+      </g>
+      {% endfor %}
+    </g>
+    <g class="ticks" fill="currentColor" fill-opacity="0.75" font-size="13">
+      {% for y, label in c.y_ticks %}
+      <text x="{{ c.plot[0] - 10 }}" y="{{ y + 4 }}" text-anchor="end">{{ label }}</text>
+      {% endfor %}
+      {% for x, label, anchor in c.x_ticks %}
+      <text x="{{ x }}" y="{{ c.height - 14 }}" text-anchor="{{ anchor }}">{{ label }}</text>
+      {% endfor %}
+      {% for x1, x2 in c.gaps %}
+      <text x="{{ ((x1 + x2) / 2) | round(1) }}" y="{{ c.plot[1] + 14 }}" text-anchor="middle">removed</text>
+      {% endfor %}
+    </g>
+  </svg>
+  <p>{{ c.description }} Hover a point for its price; the table below lists every version.</p>
+</div>
+{%- endmacro %}
