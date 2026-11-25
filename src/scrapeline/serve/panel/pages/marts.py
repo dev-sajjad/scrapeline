@@ -184,9 +184,11 @@ limit $limit
 PRODUCT_SOURCES_SQL = (
     "select distinct source_id from product_price_history order by source_id limit $limit"
 )
+# Newest first, so a long history keeps its latest versions; the page puts them back in order.
 PRODUCT_SQL = (
     _HISTORY_SELECT
-    + " where source_id = $source and external_id = $external_id order by version limit $limit"
+    + " where source_id = $source and external_id = $external_id"
+    + " order by version desc limit $limit"
 )
 HEALTH_LAST_DAY_SQL = "select max(date_day) from scraper_health_daily"
 HEALTH_DAYS_SQL = (
@@ -502,17 +504,20 @@ def product_history(
         return _unavailable(request, "Price history", exc, path)
     if not history:
         raise HTTPException(404, f"No product {external_id!r} from {source_id!r} in the marts.")
-    title = history[-1]["title"] or external_id
-    views = [_change_view(row) for row in reversed(history)]
+    latest = history[0]
+    title = latest["title"] or external_id
+    views = [_change_view(row) for row in history]
     return render(
         request,
         "marts/product.html",
         {
             "title": f"{title} · Price history",
-            "product": history[-1],
+            "product": latest,
             "product_title": title,
-            "chart": price_chart(history, title),
+            "chart": price_chart(history[::-1], title),
             "history": views,
+            # Versions are numbered from 1 without gaps, so the latest number is the count.
+            "total_versions": latest["version"],
             "stock_changes": [row for row in views if row.get("stock_changed")],
         },
     )

@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 
 from scrapeline.serve.panel.app import create_app
+from scrapeline.serve.panel.pages import marts
 from scrapeline.serve.panel.pages.marts import MART_COLUMNS, MINUS, product_href
 from scrapeline.settings import Settings
 from tests.conftest import ROOT
@@ -290,6 +291,11 @@ def add_history(path: Path, rows: list[dict[str, Any]]) -> None:
         _insert(con, "product_price_history", rows)
 
 
+def retitled(rows: list[dict[str, Any]], *titles: str) -> list[dict[str, Any]]:
+    """The same versions with a title per version, as when a shop renames a product."""
+    return [{**row, "title": title} for row, title in zip(rows, titles, strict=True)]
+
+
 def client_for(warehouse: Path) -> TestClient:
     # Marts pages never touch Postgres; port 1 refuses connections if one tried.
     engine = create_engine("postgresql+psycopg://nobody:nothing@127.0.0.1:1/none")
@@ -395,6 +401,28 @@ def test_unknown_stock_is_not_shown_as_out_of_stock(warehouse: Path) -> None:
     assert re.findall(r"<td>(.*?)</td>", stock) == [f"yes → {unknown}", f"{unknown} → yes"]
     versions = body.split("<h2>Versions</h2>", 1)[1]
     assert "<td>no</td>" not in versions and versions.count(f"<td>{unknown}</td>") == 2
+
+
+def test_a_long_history_shows_its_latest_versions(
+    warehouse: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    updates = [("update", price, True) for price in ("32.00", "34.00", "35.00")]
+    kettle = _product(7, "SIM-0012", "Kettle", [("insert", "30.00", True), *updates])
+    add_history(warehouse, retitled(kettle, "Kettle", "Kettle", "Kettle", "Kettle (new model)"))
+    monkeypatch.setattr(marts, "MAX_HISTORY", 3)
+    body = main(client_for(warehouse).get("/marts/price-history/shop/SIM-0012").text)
+    # The title and the end of the chart come from the current version, not an old one.
+    assert "<h1>Kettle (new model)</h1>" in body
+    assert "4 versions in all; the chart and tables show the latest 3." in body
+    versions = body.split("<h2>Versions</h2>", 1)[1]
+    numbers = re.findall(r'<th scope="row" class="num">(\d+)</th>', versions)
+    assert numbers == ["4", "3", "2"]
+    svg = body.split("<svg", 1)[1].split("</svg>", 1)[0]
+    assert "From 32.00 GBP on 2026-11-02 09:00 UTC to 35.00 GBP on 2026-11-04" in svg
+
+
+def test_a_complete_history_has_no_truncation_note(client: TestClient) -> None:
+    assert "versions in all" not in client.get("/marts/price-history/shop/SIM-0002").text
 
 
 def test_product_ids_that_are_urls_work(client: TestClient) -> None:

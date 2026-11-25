@@ -12,6 +12,9 @@
   · <a href="/data/product/{{ product.record_id }}">record lineage</a>
   {% if product.url and product.url.lower().startswith(("http://", "https://")) %}· <a href="{{ product.url }}" rel="noopener noreferrer nofollow">product page</a>{% endif %}
 </p>
+{% if total_versions > history | length %}
+<p class="empty">{{ total_versions | number }} versions in all; the chart and tables show the latest {{ history | length | number }}.</p>
+{% endif %}
 
 <h2>Price over time</h2>
 {% if chart %}
