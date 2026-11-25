@@ -120,14 +120,40 @@ def test_filters_on_an_empty_database_say_nothing_matches(client: TestClient) ->
 
 def test_hostile_values_are_escaped_everywhere(client: TestClient, clean_db: Engine) -> None:
     with clean_db.begin() as conn:
+        # Scraped page content ends up in site evidence, tags and platform.
+        site_id = conn.execute(
+            t.site.insert()
+            .values(
+                host="hostile.example",
+                category_method="evidence",
+                category_evidence=[
+                    {"signal": SCRIPT, "value": SCRIPT, "weight": SCRIPT},
+                    SCRIPT,
+                ],
+                tags=[SCRIPT, {"tag": SCRIPT}],
+                platform=SCRIPT,
+            )
+            .returning(t.site.c.id)
+        ).scalar_one()
         add_source(
             conn,
             "hostile",
             name=SCRIPT,
             status_note=SCRIPT,
+            site_id=site_id,
             config={"entry": "javascript:alert(1)", "usage": {"purpose": SCRIPT}},
         )
         run_id = add_run(conn, "hostile", status="failed", error=SCRIPT)
+        conn.execute(
+            t.rejects.insert().values(
+                run_id=run_id,
+                source_id="hostile",
+                record_type=SCRIPT,
+                raw_sha256="0" * 64,
+                record={"title": SCRIPT, SCRIPT: 1},
+                reason=SCRIPT,
+            )
+        )
         incident_id = conn.execute(
             t.incident.insert()
             .values(
@@ -157,12 +183,81 @@ def test_hostile_values_are_escaped_everywhere(client: TestClient, clean_db: Eng
         f"/runs/{run_id}",
         "/incidents",
         f"/incidents/{incident_id}",
+        "/sites",
+        "/sites/hostile.example",
     ):
         page = client.get(path)
         assert page.status_code == 200, path
         assert SCRIPT not in page.text, path
         assert ESCAPED in page.text, path
         assert 'href="javascript:' not in page.text, path
+
+
+def test_run_page_lists_the_first_rejects_with_their_raw_files(
+    client: TestClient, clean_db: Engine
+) -> None:
+    sha = "ab" * 32
+    with clean_db.begin() as conn:
+        add_source(conn, "rejecting")
+        run_id = add_run(conn, "rejecting")
+        conn.execute(
+            t.rejects.insert(),
+            [
+                {
+                    "run_id": run_id,
+                    "source_id": "rejecting",
+                    "record_type": "product",
+                    "raw_sha256": sha,
+                    "record": {"n": n, "title": SCRIPT if n == 0 else f"Book {n}"},
+                    "reason": SCRIPT if n == 0 else f"price: not a money value ({n})",
+                }
+                for n in range(21)
+            ],
+        )
+    page = client.get(f"/runs/{run_id}")
+    assert page.status_code == 200
+    tree = HTMLParser(page.text)
+    heading = next(h2 for h2 in tree.css("h2") if h2.text().startswith("Rejects"))
+    assert " ".join(heading.text().split()) == "Rejects 21"
+    table = heading.next
+    while table is not None and table.tag != "div":
+        table = table.next
+    assert table is not None
+    shown = table.css("tbody tr")
+    assert len(shown) == 20
+    assert "price: not a money value (1)" in shown[1].text()
+    assert "The first 20 of 21 rejects." in page.text
+    for row in shown:
+        assert row.css_first(f'a[href="/storage/raw/{sha}"]') is not None
+        record = row.css_first("details.json pre")
+        assert record is not None and '"n":' in record.text()
+    assert SCRIPT not in page.text
+    assert ESCAPED in (shown[0].html or "")  # in the reason
+    record = shown[0].css_first("details.json pre")
+    assert record is not None and '"title": "&lt;script&gt;' in (record.html or "")
+
+
+def test_run_page_lists_incidents_it_repeated(client: TestClient, clean_db: Engine) -> None:
+    with clean_db.begin() as conn:
+        add_source(conn, "repeating")
+        first = add_run(conn, "repeating", status="failed", started=NOW - timedelta(hours=2))
+        repeat = add_run(conn, "repeating", status="failed")
+        unrelated = add_run(conn, "repeating", started=NOW - timedelta(hours=1))
+        # Opened by the first run; the second run found the same problem and is recorded
+        # as the incident's last run.
+        conn.execute(
+            t.incident.insert().values(
+                source_id="repeating",
+                run_id=first,
+                kind="fetch_error",
+                summary="Site answered 503 twice",
+                details={"occurrences": 2, "last_run_id": str(repeat)},
+            )
+        )
+    for run_id, listed in ((first, True), (repeat, True), (unrelated, False)):
+        page = client.get(f"/runs/{run_id}").text
+        assert ("Site answered 503 twice" in page) is listed, run_id
+    assert "This run opened or repeated no incident." in client.get(f"/runs/{unrelated}").text
 
 
 def test_unreviewed_terms_are_flagged(client: TestClient, clean_db: Engine) -> None:
